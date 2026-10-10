@@ -92,11 +92,13 @@ def compare_reports(previous: dict[str, Any], current: dict[str, Any]) -> dict[s
 
 def analyze_crash_artifacts(run_dir) -> dict[str, Any]:
     """Conservative filename/content triage for crash and panic artifacts already collected."""
-    from pathlib import Path
     import json
     import re
+    from pathlib import Path
 
-    roots = [Path(run_dir) / "raw" / "crash-reports", Path(run_dir) / "raw" / "pymobiledevice3-crash-reports"]
+    roots = [Path(run_dir) / "raw" / "crash-reports",
+             Path(run_dir) / "raw" / "pymobiledevice3-crash-reports",
+             Path(run_dir) / "raw" / "offline-evidence"]
     files = [path for root in roots if root.exists() for path in root.rglob("*") if path.is_file()]
     panic_items = []
     crash_items = []
@@ -126,7 +128,7 @@ def analyze_crash_artifacts(run_dir) -> dict[str, Any]:
                             item[key] = str(payload[key])[:500]
                     break
             if "panicString" not in item:
-                match = re.search(r"(?im)^panicString\s*:\s*(.+)$|(?im)^panic\s*:\s*(.+)$", content)
+                match = re.search(r"(?im)^panicString\s*:\s*(.+)$|^panic\s*:\s*(.+)$", content)
                 if match:
                     item["panicString"] = (match.group(1) or match.group(2) or "").strip()[:500]
         except OSError as exc:
@@ -135,4 +137,55 @@ def analyze_crash_artifacts(run_dir) -> dict[str, Any]:
     return {"files_scanned":len(files), "crash_or_diagnostic_count":len(crash_items),
             "panic_or_watchdog_candidate_count":len(panic_items), "panic_candidates":panic_items[:100],
             "crash_candidates":crash_items[:200],
+            "recurrence": _recurrence_analysis(panic_items, crash_items),
             "interpretation":"Filename/content triage only. A panic artifact is not by itself proof of a hardware fault; correlate repeated incidents and seek professional diagnostics."}
+
+
+def _recurrence_analysis(panic_items: list[dict[str, Any]],
+                         crash_items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Group panic/crash artifacts by bug_type and process; detect repeats.
+
+    A repeated identical bug_type+procName combination is a *pattern*, not a
+    diagnosis. Timestamps are parsed leniently; unknown formats degrade to
+    'unknown' rather than fabricating a date.
+    """
+    import datetime as _dt
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for item in list(panic_items) + list(crash_items):
+        key = (str(item.get("bug_type", "unknown")), str(item.get("procName", item.get("name", "unknown"))))
+        groups.setdefault(key, []).append(item)
+
+    patterns: list[dict[str, Any]] = []
+    for (bug_type, proc), items in groups.items():
+        if len(items) < 2:
+            continue
+        timestamps = []
+        for it in items:
+            raw = str(it.get("timestamp") or it.get("captureTime") or "")
+            parsed = None
+            for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    parsed = _dt.datetime.strptime(raw.replace("+0000", "Z").rstrip("Z")
+                                                   if not raw.endswith("Z") else raw, fmt)
+                    break
+                except ValueError:
+                    continue
+            timestamps.append(parsed.isoformat() + "Z" if parsed else None)
+        known = [t for t in timestamps if t]
+        patterns.append({
+            "bug_type": bug_type, "procName": proc, "occurrences": len(items),
+            "timestamps": known[:20],
+            "timestamps_unknown": len(timestamps) - len(known),
+            "span": (f"{min(known)} → {max(known)}" if len(known) >= 2 else "insufficient timestamp data"),
+            "classification": "weak_heuristic_pattern",
+            "note": "Repeated artifacts suggest recurrence; a pattern is not a hardware diagnosis.",
+            "paths": [str(i.get("path")) for i in items[:10]],
+        })
+    patterns.sort(key=lambda p: (-p["occurrences"], p["bug_type"]))
+    return {
+        "repeated_patterns": patterns[:50],
+        "pattern_count": len(patterns),
+        "note": ("Recurrence analysis groups artifacts by (bug_type, procName). "
+                 "Two+ occurrences warrant investigation; they never constitute a "
+                 "hardware diagnosis by themselves."),
+    }

@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .util import run_command, write_command_result, safe_name
+from .util import run_command, safe_name, write_command_result
 
 LIB_TOOLS = ["idevice_id", "ideviceinfo", "idevicepair", "idevicediagnostics",
              "idevicecrashreport", "idevicesyslog", "idevicebackup2", "ideviceinstaller",
@@ -39,7 +39,7 @@ def diagnostic_candidates(payload: bytes, source: str) -> list[dict[str, Any]]:
     parsed = parse_plist(payload)
     if parsed is None:
         parsed = parse_key_values(decode(payload))
-    patterns = re.compile(r"battery|gas.?gauge|cycle.?count|full.?charge|design.?capacity|maximum.?capacity|temperature|thermal|voltage|health|nand|disk.?capacity", re.I)
+    patterns = re.compile(r"battery|gas.?gauge|cycle.?count|full.?charge|design.?capacity|maximum.?capacity|temperature|thermal|voltage|health|nand|disk.?capacity", re.IGNORECASE)
     candidates: list[dict[str, Any]] = []
 
     def walk(value: Any, prefix: str = "") -> None:

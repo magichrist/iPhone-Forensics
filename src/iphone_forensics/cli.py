@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .analysis import analyze_crash_artifacts, automated_assessment, compare_reports, derive_findings
+from .analysis import (
+    analyze_crash_artifacts,
+    automated_assessment,
+    compare_reports,
+    derive_findings,
+)
 from .buyer import template
 from .collectors import LIB_TOOLS, collect_capabilities, collect_device, discover_devices
 from .reporting import finalize
@@ -103,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     raw.mkdir(mode=0o700)
     report: dict[str, Any] = {
         "project":"iPhone Forensics", "version":__version__,
-        "started_at":dt.datetime.now(dt.timezone.utc).isoformat(), "finished_at":None,
+        "started_at":dt.datetime.now(dt.UTC).isoformat(), "finished_at":None,
         "host":{"platform":platform.platform(), "macOS":platform.mac_ver()[0],
                 "python":sys.version.split()[0], "architecture":platform.machine()},
         "tools":{name:shutil.which(name) for name in LIB_TOOLS},
@@ -176,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _run_mvt_backup(backup_path: str, run_dir: Path, raw: Path, report: dict[str, Any]) -> None:
     import shutil
+
     from .util import run_command, write_command_result
     executable = shutil.which("mvt-ios")
     source = Path(backup_path).expanduser().resolve()

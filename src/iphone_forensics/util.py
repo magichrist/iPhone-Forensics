@@ -12,11 +12,17 @@ from typing import Any
 
 
 def utc_now() -> str:
-    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    return dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
 
 
 def safe_name(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", value or "unknown")[:100]
+    # Neutralize traversal sequences: collapse any repeated dots and keep the
+    # result from starting with dots, so "../.." can never survive sanitization.
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value or "unknown")
+    cleaned = re.sub(r"\.{2,}", ".", cleaned)
+    if cleaned.startswith("."):
+        cleaned = "_" + cleaned
+    return cleaned[:100]
 
 
 def sha256_file(path: Path) -> str:

@@ -1,10 +1,57 @@
-# iPhone Forensics v3
+# iPhone Forensics v4
 
-**A local-first, buyer-focused iPhone inspection tool for macOS.** It combines `libimobiledevice` CLI collectors and optional `pymobiledevice3` CLI capabilities, produces a detailed **HTML report** (primary deliverable), a machine-readable JSON report, raw command evidence, a buyer checklist, and a SHA-256 manifest.
+**Hardware-first iPhone diagnostics, integrity assessment, and buyer/repair inspection toolkit.** Local-first, read-only by default, and honest about what software can and cannot verify.
+
+- **v4 CLI (`iphone-surgery`)** — subcommands: `doctor`, `devices`, `inspect` (device or `--backup-dir` offline), `integrity`, `evidence-verify`, `report`, `tools`, `checklist`, `case` (repair-shop workflow), `manual-tests`, `buyer`, `hardware`, `diagnose`, `capabilities`, `compare`, `config`.
+- **Hardware health engine** — normalized checks for battery (cycle count, capacity fields from GasGauge diagnostics) and storage (marketed vs usable vs physical capacity), plus keyword triage of panic strings; everything not genuinely measurable is `not_tested`, never a pass.
+- **Capability matrix** — `capabilities` prints the shared matrix (one row per check: automated / partial / manual / unsupported, with source and limits) from `capabilities.py`; the same data drives the report's section 12, so the console and the HTML report cannot drift apart.
+- **Integrity engine** — snapshot comparison with nine explicit classifications (verified / consistent / change_detected / replacement_indicated / suspicious / inconclusive / not_detectable / not_tested / unsupported). A metadata change is never auto-described as a physical part swap.
+- **Buyer checklist** — twenty-point editable checklist with verdicts driven by *critical gaps*, not a fake score.
+- **Repair-case workflow** — case file with intake, symptoms, work log, pre/post-repair integrity comparison, and a 14-item QA checklist.
+- **Evidence integrity** — SHA-256 manifest covering collected artifacts, plus `evidence-verify` for later checking; hashes prove unchanged-since-hashing, never authenticity.
+- **Offline analysis** — inspect an existing authorized backup or a folder of `.ips`/panic artifacts with no phone connected.
 
 > **Honest scope:** no ordinary paired-Mac tool can inspect every protected iOS artifact or certify that a used phone is genuine, free of spyware, free of hidden repairs, water-resistant, or free of latent hardware faults. Unknown means unknown. The buyer must independently verify activation/ownership and carrier eligibility and physically test the phone.
 
-## What v3 includes
+## v4 quick start
+
+```bash
+python3 -m iphone_forensics.cli_v4 doctor
+python3 -m iphone_forensics.cli_v4 devices
+python3 -m iphone_forensics.cli_v4 checklist --out ~/checklist.json
+# …edit the checklist…
+python3 -m iphone_forensics.cli_v4 inspect --buyer-json ~/checklist.json
+python3 -m iphone_forensics.cli_v4 inspect --backup-dir /path/to/authorized/backup   # offline
+python3 -m iphone_forensics.cli_v4 integrity --previous old/report.json --current new/report.json
+python3 -m iphone_forensics.cli_v4 case ~/shop-cases/CASE-001.json --case-id CASE-001 \
+    --symptoms "battery drains" --baseline pre.json --post post.json --compare --close
+python3 -m iphone_forensics.cli_v4 case ~/shop-cases/CASE-001.json --json   # machine roll-up on stdout
+python3 -m iphone_forensics.cli_v4 evidence-verify ~/Desktop/iphone-forensics/iphone-audit-YYYYMMDD-HHMMSS
+python3 -m iphone_forensics.cli_v4 capabilities      # what software can and cannot verify
+python3 -m iphone_forensics.cli_v4 manual-tests      # the guided physical test script
+```
+
+The `python3 -m iphone_forensics.cli_v4 …` form requires the package to be installed (`pip install -e .`, see [Install](#install)) or `PYTHONPATH=src`; once installed, the shorter `iphone-surgery …` form is equivalent.
+
+Machine-readable outputs: `buyer --json [--out FILE]`, `hardware --json [--out FILE]`, `case --json` (JSON on stdout; that run's human progress lines go to stderr), `compare --previous A --current B --out FILE`, and `integrity --previous A --current B --out FILE`. `checklist --out` and `config --out` write JSON templates.
+
+Identifier-masked exports: `inspect --redact` and `report <report.json> --redact` also write `report-redacted.{html,json}` for sharing. Raw evidence and the private `report.json` are never redacted (see `docs/v4/privacy.md`).
+
+Exit codes: `0` clean, `1` review-worthy findings, `2` configuration/tool error, `3` no device, `4` multiple/ambiguous device. `5` (`EXIT_PARTIAL`) and `6` (`EXIT_TOOL_FAILURE`) are defined but not currently emitted. `--no-fail-on-findings` forces `0` on completed runs — never on a run that collected nothing (no toolkit, no device, unusable `--backup-dir`, which exits `2`).
+
+`inspect` prints exactly one progress line per stage — `[1/5] discovery`, `[2/5] collection`, `[3/5] triage`, `[4/5] assessment`, `[5/5] report`. `--quiet` drops that chatter and keeps only a three-line summary (run directory, report path, findings by severity) plus error text; `--verbose` adds per-stage seconds and one name/status/seconds line per collected command. Both work before or after the subcommand name.
+
+`integrity` and `compare` print a `Device continuity: …` line (`established`, `not_tested`, or `not_detectable`). When the two snapshots cannot be linked to the same physical device the tool says so instead of comparing blindly, and the same value appears in the report's integrity section — "no differences found" is never presented as a pass across an unproven link.
+
+Running `iphone-surgery` with **no subcommand** prints a concise welcome screen — version, toolchain counts, a redacted device count, prerequisites (unlocked, Trust, data cable), and suggested next actions — then exits `0`. It never prompts unless `--interactive` is passed *and* stdin is a TTY, so it is safe for scripts.
+
+### Configuration
+
+`iphone-surgery config --out ./iphone-surgery.json` writes a template. On startup the CLI auto-loads `./iphone-surgery.json` when present, and `--config <path>` overrides it. Precedence: **CLI flag > `--config` > `./iphone-surgery.json` > built-in defaults**. Applied keys: `output_root` (output location), `subprocess_timeout_seconds_default` (bounded subprocess default), `syslog_max_seconds` (caps `--syslog-seconds`), `offline_evidence_max_file_mb` / `offline_evidence_max_files` (offline evidence-copy caps), and `redact_identifiers_in_console` (console identifiers are always masked; this key additionally writes the `report-redacted.*` exports). An invalid or missing config file exits `2`. The `config` subcommand never auto-loads, so `iphone-surgery config --out ./iphone-surgery.json --force` can always repair a broken file.
+
+After installing the package (`pip install -e .`) the same commands work as `iphone-surgery <command>`; the legacy `iphone-forensics` CLI continues to work unchanged.
+
+## What v3 included (still present)
 
 - Buyer verdict based on **critical checklist gaps**, not a misleading single hardware score.
 - Editable 20-point buyer checklist covering Activation Lock, Remote Management, carrier eligibility, repair history, battery, screen/touch, Face ID, cameras, audio, buttons, charging, wireless, cellular, GPS/NFC, physical damage, storage claims, and transaction documentation.
@@ -183,11 +230,17 @@ The default collection avoids erase, restore, reboot, shutdown, changing setting
 
 ```text
 src/iphone_forensics/
-├── cli.py          # argument parsing, run lifecycle, output folder
+├── cli.py          # v3 argument parsing, run lifecycle, output folder
+├── cli_v4.py       # v4 `iphone-surgery` CLI: welcome, config, subcommands, exit codes
 ├── collectors.py   # libimobiledevice + pymobiledevice3 CLI adapters
+├── capabilities.py # capability matrix data (automated/partial/manual/unsupported)
 ├── buyer.py        # checklist schema and buyer verdict logic
 ├── analysis.py     # conservative findings and evidence coverage assessment
-├── reporting.py    # HTML report, JSON and SHA-256 manifest
+├── hardware.py     # battery/storage health checks + manual-guided test definitions
+├── integrity.py    # snapshot normalization, continuity, 9-class change assessment
+├── evidence.py     # v4 SHA-256 manifest build/verify (v3 manifests still accepted)
+├── repair.py       # repair case intake, work log, pre/post compare, QA summary
+├── reporting.py    # HTML report (15 sections), JSON and SHA-256 manifest
 └── util.py         # bounded subprocesses, streaming capture, safe filesystem helpers
 ```
 
@@ -203,7 +256,7 @@ If no device is detected, unlock it, retry the trust prompt, try another data ca
 
 ## Project quality
 
-Run the tests with `pytest`. Tests are local and do not require a connected iPhone. Hardware integration remains dependent on the real phone, iOS build, cable, trust state, and installed CLI versions.
+Run the tests with `pytest`. Tests are local and do not require a connected iPhone. Hardware integration remains dependent on the real phone, iOS build, cable, trust state, and installed CLI versions. The most recent recorded gate run (pytest, ruff, offline CLI sweep, and the skipped physical-device matrix) is in `docs/v4/phase-6-validation.md`, with a wave-by-wave roll-up in `docs/v4/wave-status.md`.
 
 ## References
 

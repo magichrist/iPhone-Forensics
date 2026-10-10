@@ -1,2 +1,2 @@
-"""iPhone Forensics: safe local inspection and buyer-focused reporting."""
-__version__ = "3.0.0"
+"""iPhone Forensics: hardware-first inspection, integrity, buyer and repair workflows."""
+__version__ = "4.0.0"
