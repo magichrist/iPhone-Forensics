@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iphone-forensics"
+version = "3.0.0"
+description = "Local-first, non-destructive used-iPhone inspection and evidence reporting"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "iPhone Forensics contributors"}]
+dependencies = []
+
+[project.optional-dependencies]
+pymobiledevice3 = ["pymobiledevice3>=7"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+iphone-forensics = "iphone_forensics.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
