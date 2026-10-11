@@ -169,3 +169,70 @@ def _safe_int(value: Any) -> int | None:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+# ---------------------------------------------------- v5 collection statuses
+# v5 records *how* a collection attempt ended (permissions, missing tools,
+# user choice, ...) separately from *how healthy* the result is.  Purely
+# additive: the v4 dataclasses above keep their historical fields untouched.
+
+COLLECTION_STATUSES = (
+    "collected",          # artifact captured successfully
+    "passed",             # explicit pass without a stored artifact
+    "warning",            # collected, but something deserves review
+    "failed",             # test ran and the result is negative
+    "inconclusive",       # evidence exists but is insufficient/contradictory
+    "unsupported",        # tools/hardware genuinely cannot answer
+    "permission_denied",  # blocked by pairing/trust/consent
+    "tool_missing",       # required tool not installed
+    "collection_error",   # tool ran and errored (partial/timeout/crash)
+    "skipped_by_user",    # operator chose not to run it
+    "not_applicable",     # question does not apply to this device
+)
+
+EPISTEMIC_LABELS = (
+    "observed",      # measured/read directly from an artifact
+    "inferred",      # derived from observed evidence via stated reasoning
+    "unknown",       # no evidence either way
+    "needs_manual",  # requires human hands-on inspection
+)
+
+# Health-integrity roll-up when collapsing collection outcomes for summaries.
+STATUS_TO_HEALTH: dict[str, str] = {
+    "collected": "pass",
+    "passed": "pass",
+    "warning": "pass_with_warnings",
+    "failed": "fail",
+    "inconclusive": "inconclusive",
+    "unsupported": "unsupported",
+    "permission_denied": "not_tested",
+    "tool_missing": "not_tested",
+    "collection_error": "not_tested",
+    "skipped_by_user": "not_tested",
+    "not_applicable": "not_tested",
+}
+
+# Historical outcome strings (v4 EvidenceRecord.outcome and early pilots) are
+# still present in run directories and JSON produced before v5.
+_LEGACY_STATUS_ALIASES = {
+    "success": "collected",
+    "expected_end": "collected",
+    "failed_or_partial": "collection_error",
+}
+
+
+def normalize_status(value: str) -> str:
+    """Map any historical/loose status string onto COLLECTION_STATUSES.
+
+    Never raises: non-strings, blanks, and unknown values resolve to
+    "inconclusive" rather than blowing up a report roll-up.
+    """
+    try:
+        key = str(value).strip().lower()
+    except Exception:  # noqa: BLE001 - str() on an exotic object must not break a report roll-up
+        return "inconclusive"
+    if key in _LEGACY_STATUS_ALIASES:
+        return _LEGACY_STATUS_ALIASES[key]
+    if key in COLLECTION_STATUSES:
+        return key
+    return "inconclusive"
