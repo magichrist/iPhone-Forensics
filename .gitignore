@@ -7,7 +7,16 @@ build/
 dist/
 *.egg-info/
 .DS_Store
+# Run directories this tool creates in the working directory. A real device run
+# leaves unredacted UDIDs, serials and IMEIs in report.json and evidence/, so these
+# must never be committed.
+iphone-forensics-*/
 iphone-audit-*/
+
+# Throwaway discovery probes. These are now TemporaryDirectory-based at runtime,
+# but older runs and manual invocations can still leave one behind.
+doctor-probe/
+devices-probe/
+
 .freebuff/
 docs/
-doctor-probe/
