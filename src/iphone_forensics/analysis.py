@@ -36,6 +36,36 @@ def _is_evidence_gap(status: str) -> bool:
     return status not in _COMPLETED_STATUSES
 
 
+# How severe a finding about each gap status should be.
+#
+# Severity is what the reader (and `--fail-on-findings`) act on, so it must match
+# what the gap *is*. Every status above is an evidence gap, but they are not all
+# the same kind:
+#
+#   * `failed` and `inconclusive` are the only two where a check actually ran and
+#     returned something worth a human's attention.
+#   * `permission_denied`, `tool_missing`, `collection_error` and `skipped_by_user`
+#     are gaps about *this machine's* environment or this operator's consent.
+#     Their own detail text already says "this is not a device fault" and
+#     "nothing is wrong with the device" — grading them REVIEW contradicted that
+#     sentence and turned every environment problem into a device problem, which
+#     is precisely the confusion this tool exists to prevent.
+#   * `unsupported` and `not_applicable` mean the question does not apply.
+#
+# A healthy phone on a machine missing an optional tool must not exit nonzero with
+# a list of things to investigate.
+_GAP_SEVERITY: dict[str, str] = {
+    "failed": "REVIEW",
+    "inconclusive": "REVIEW",
+    "permission_denied": "INFO",
+    "tool_missing": "INFO",
+    "collection_error": "INFO",
+    "skipped_by_user": "INFO",
+    "unsupported": "INFO",
+    "not_applicable": "INFO",
+}
+
+
 # Severity -> epistemic label, for findings that carry no explicit one.
 # docs/v5/05 requires every finding to say *how* we know: read straight from an
 # artifact, reasoned from evidence, genuinely unknown, or needing human hands.
@@ -99,7 +129,8 @@ def derive_findings(report: dict[str, Any], buyer_data: dict[str, Any] | None) -
     for item in report.get("collection", []):
         status = _status_of(item)
         if _is_evidence_gap(status):
-            findings.append({"severity":"REVIEW", "title":f"Collection incomplete: {item.get('name')}",
+            findings.append({"severity":_GAP_SEVERITY.get(status, "INFO"),
+                "title":f"Collection incomplete: {item.get('name')}",
                 "detail":_GAP_DETAIL.get(status, "No usable evidence was collected for this step."),
                 "status":status,
                 "evidence":[f"{EVIDENCE_DIR_NAME}/{item.get('stdout_file','')}",
@@ -109,7 +140,14 @@ def derive_findings(report: dict[str, Any], buyer_data: dict[str, Any] | None) -
         findings.append({"severity":"BLOCKER", "title":"Buyer-critical check failed", "detail":title,
                          "evidence":["buyer-checklist.json"]})
     for title in evaluation["critical_unknowns"]:
-        findings.append({"severity":"REVIEW", "title":"Buyer-critical check not verified", "detail":title,
+        # INFO, not REVIEW. These are checks the tool never claimed to perform
+        # automatically (Activation Lock, carrier eligibility, iCloud sign-out):
+        # they need a human in Settings. Grading them REVIEW made a perfectly
+        # ordinary run exit nonzero with N "things to investigate" that were
+        # never device observations in the first place. They are listed so the
+        # buyer knows what to verify, not as defects found.
+        findings.append({"severity":"INFO", "title":"Buyer-critical check not verified",
+                         "detail":f"{title} — not verifiable by software; confirm manually before paying.",
                          "epistemic":"needs_manual",   # a human must verify this one
                          "evidence":["buyer-checklist.json"]})
     return label_findings(findings)

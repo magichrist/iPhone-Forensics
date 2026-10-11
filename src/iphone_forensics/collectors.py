@@ -102,6 +102,55 @@ def save_result(raw: Path, collection: list[dict[str, Any]], name: str,
     return result
 
 
+def _pmd_supports_udid_flag(pmd: str) -> bool:
+    """True when this pymobiledevice3 build still accepts the global `--udid`.
+
+    The option was removed in pymobiledevice3 11.x, where device selection moved
+    to `--tunnel`/`--rsd` and a single attached device is auto-selected. Passing
+    `--udid` to a build that dropped it does not degrade gracefully: the CLI
+    exits 2 with "No such option: --udid" before doing any work, so every
+    pymobiledevice3 collector failed with a `collection_error` that looked like a
+    device problem rather than a version mismatch.
+
+    Probed once per run and cached, because it costs a `--help` invocation.
+    """
+    cached = _PMD_UDID_FLAG_CACHE.get(pmd)
+    if cached is not None:
+        return cached
+    try:
+        result = run_command([pmd, "--help"], timeout=20)
+        text = (result.get("stdout", b"") + result.get("stderr", b"")).decode("utf-8", "replace")
+        supported = "--udid" in text
+    except Exception:  # noqa: BLE001 - an unprobeable tool must not abort collection
+        supported = False
+    _PMD_UDID_FLAG_CACHE[pmd] = supported
+    return supported
+
+
+_PMD_UDID_FLAG_CACHE: dict[str, bool] = {}
+
+
+def _pmd_prefix(pmd: str, udid: str, report: dict[str, Any]) -> list[str]:
+    """Command prefix selecting *udid*, using only options this build supports.
+
+    On builds that dropped `--udid` the device is selected implicitly (a single
+    attached device) or via `--tunnel UDID`. Passing the option unconditionally
+    made every pymobiledevice3 collector fail, so the gap is recorded as an
+    evidence note rather than left to look like a device fault.
+    """
+    if _pmd_supports_udid_flag(pmd):
+        return [pmd, "--udid", udid]
+    report.setdefault("findings", []).append({
+        "severity": "INFO",
+        "title": "pymobiledevice3 does not accept --udid on this version",
+        "detail": ("This build selects the attached device implicitly. "
+                   "Connect exactly one iPhone, or use a tunnel, so the tool "
+                   "cannot be told which device to use."),
+        "evidence": [],
+    })
+    return [pmd]
+
+
 def discover_devices(raw: Path, collection: list[dict[str, Any]]) -> list[str]:
     found: list[str] = []
     idevice_id = shutil.which("idevice_id")
@@ -245,7 +294,7 @@ def collect_device(args: Any, run_dir: Path, raw: Path, report: dict[str, Any], 
         report["findings"].append({"severity":"INFO", "title":"pymobiledevice3 unavailable",
             "detail":"Install the optional pymobiledevice3 dependency for additional iOS service coverage.", "evidence":[]})
         return
-    prefix = [pmd, "--udid", udid]
+    prefix = _pmd_prefix(pmd, udid, report)
     save_result(raw, collection, "pymobiledevice3-version", [pmd, "version"], 20)
     if args.pmd_app_list:
         save_result(raw, collection, "installed-apps-pymobiledevice3", [*prefix, "apps", "list"], 90)
