@@ -8,8 +8,10 @@
 This module is a **dispatcher only**. Every command delegates to the v4 engine
 in `cli_v4.py` (`cmd_devices`, `cmd_doctor`, `cmd_inspect`, `cmd_compare`,
 `cmd_checklist`) and reuses `collectors.discover_devices` for device selection,
-so no collection, triage, or assessment logic is forked here. `iphone-surgery`
-remains the advanced engine interface with its full subcommand set.
+so no collection, triage, or assessment logic is forked here. Every advanced
+engine command (`integrity`, `case`, `buyer`, `evidence-verify`, …) is mounted on
+this same binary via `cli_v4.add_subcommands`, so the project ships one name for
+one tool.
 
 Collection profiles
 -------------------
@@ -31,7 +33,7 @@ group (`--help` for the four commands stays clean; `iphone-forensics
     --udid                    -> --device
     --redact-identifiers      -> the engine's --redact
     --mvt-backup PATH         -> the offline --backup-dir analysis path
-    --init-buyer-checklist P  -> `iphone-surgery checklist --out P` (overwrites)
+    --init-buyer-checklist P  -> `iphone-forensics checklist --out P` (overwrites)
     --output / --buyer-json / --compare-json / --no-capability-catalog
                               -> passed through unchanged
 
@@ -491,10 +493,9 @@ def _default_current_report() -> Path | None:
 
 
 def _run_compare(namespace: argparse.Namespace) -> int:
-    # The previous report arrives either positionally or as --previous. Both are
-    # accepted: the positional form is the facade's, the flag is what the engine
-    # required before the two CLIs were merged, and existing scripts use it.
-    previous = str(_flag_value(namespace, "previous", "") or "")
+    # The flag wins if both forms are given, since it is the explicit one.
+    previous = str(_flag_value(namespace, "previous_flag", "")
+                   or _flag_value(namespace, "previous_report", "") or "")
     if not previous:
         print("error: compare needs a previous report.json, given either "
               "positionally or with --previous", file=sys.stderr)
@@ -646,9 +647,12 @@ def _build_parser() -> argparse.ArgumentParser:
                      "on one side is never treated as a device change.\n\n"
                      "The previous report may be given positionally or with --previous; both "
                      "forms are accepted because the engine previously required the flag."))
+    # Distinct dests on purpose. Sharing one dest looks tidier but silently loses the
+    # flag: an unsatisfied `nargs="?"` positional is applied *after* the option,
+    # overwriting it with None. So `compare --previous a.json` parsed to None.
     compare.add_argument("previous_report", metavar="PREVIOUS_REPORT", nargs="?",
                          help="Earlier run's report.json")
-    compare.add_argument("--previous", metavar="REPORT", dest="previous",
+    compare.add_argument("--previous", metavar="REPORT", dest="previous_flag",
                          help="Earlier run's report.json (alternative to the positional form)")
     compare.add_argument("--current", metavar="REPORT",
                          help="Later run's report.json (default: newest ./iphone-forensics-*/report.json)")
@@ -753,24 +757,23 @@ def _print_advanced_help() -> int:
 
     subcommands = _engine_subcommands()
     if subcommands:
-        print("\nAdvanced engine interface (`iphone-surgery`):")
-        print("  Everything above is also reachable directly, plus per-stage control,")
-        print("  repair cases, and machine-readable output. Stable, documented, and the")
-        print("  surface to reach for when scripting or post-processing a run.")
+        print("\nAdvanced commands (same binary, listed in --help):")
+        print("  Everything above, plus per-stage control, repair cases, and")
+        print("  machine-readable output — the surface to reach for when scripting")
+        print("  or post-processing a run.")
         width = max(len(name) for name, _ in subcommands) + 2
         for name, help_text in subcommands:
             print(f"  {name:<{width}} {help_text}")
-        print("\n  Run `iphone-surgery <command> --help` for the flags of one stage.")
+        print(f"\n  Run `{PROGRAM} <command> --help` for the flags of one stage.")
 
     print("\nExamples:")
     print(f"  {PROGRAM} inspect --app-list --provisioning")
     print(f"  {PROGRAM} inspect --syslog-seconds 30 --no-sensitive")
     print(f"  {PROGRAM} inspect --device 00008030-001234567890ABCD")
-    print("  iphone-forensics --init-buyer-checklist ./checklist.json")
-    print("  iphone-surgery case --new --udid <udid> && iphone-surgery case --json")
+    print(f"  {PROGRAM} --init-buyer-checklist ./checklist.json")
+    print(f"  {PROGRAM} case --new --udid <udid> && {PROGRAM} case --json")
     print("\nExit codes:")
     print("  0 ok · 1 findings · 2 usage/config · 3 no device · 4 ambiguous device")
-    print("  5 device error · 6 integrity alarm  (see `iphone-surgery --help`)")
     return EXIT_OK
 
 
