@@ -457,3 +457,51 @@ def assess_integrity(previous: dict[str, Any] | None, current: dict[str, Any],
                        "replacement. Only concrete diagnostic assertions (e.g. Apple's Parts & Service History, "
                        "a supported diagnostic service, or technician-verified evidence) can indicate a replacement."),
     }
+
+
+def audit_integrity_claims(report: dict[str, Any]) -> list[str]:
+    """Enforce the `component_replaced` and `never_tampered` claim rules.
+
+    * A replacement claim must trace to a supported diagnostic source. A metadata
+      difference is a *change*, never a repair record.
+    * Continuity is a property of a physical device. Two snapshots that merely
+      repeat a value do not establish it, so it is never asserted as proof of
+      integrity.
+    """
+    from .capabilities import fallback_for
+
+    violations: list[str] = []
+    integrity = report.get("integrity_assessment")
+    if not isinstance(integrity, dict):
+        return violations
+
+    # Every replacement claim must name a supported source somewhere in the record.
+    for field_name, classification in (integrity.get("classifications") or {}).items():
+        if str(classification).strip().lower() != "replacement_indicated":
+            continue
+        sources = [str(change.get("source", "")) for change in integrity.get("changes", [])
+                   if isinstance(change, dict)]
+        if not any(_norm(source) in SUPPORTED_REPLACEMENT_SOURCES for source in sources):
+            violations.append(
+                f"component_replaced: {field_name} claims replacement without a supported "
+                f"diagnostic source -> {fallback_for('component_replaced')}")
+
+    # Continuity may be reported, but never as a clean bill of health.
+    continuity = str(integrity.get("continuity") or "").strip().lower()
+    if continuity == "established" and not _has_hardware_bound_identifier(report):
+        violations.append(
+            f"never_tampered: continuity asserted without a hardware-bound identifier "
+            f"-> {fallback_for('never_tampered')}")
+
+    return violations
+
+
+def _has_hardware_bound_identifier(report: dict[str, Any]) -> bool:
+    """True when the report carries an identifier that cannot be changed in software.
+
+    A serial number read from the device is hardware-bound; a snapshot that merely
+    repeats a value is not.
+    """
+    device = report.get("device") if isinstance(report.get("device"), dict) else {}
+    serial = str(device.get("SerialNumber") or "").strip()
+    return bool(serial) and len(serial) >= 6
