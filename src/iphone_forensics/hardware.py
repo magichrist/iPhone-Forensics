@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from .models import SubsystemCheck
+from .util import utc_now
 
 BYTES_PER_GB_DECIMAL = 1_000_000_000
 
@@ -71,27 +72,50 @@ def battery_checks(report: dict[str, Any]) -> list[SubsystemCheck]:
     checks: list[SubsystemCheck] = []
 
     # 1. Cycle count from GasGauge diagnostics if the device exposed it.
+    # A missing metric is an evidence gap and is worded as one: it must never be
+    # read as evidence of a replaced battery (docs/v5/06 claim matrix).
     cycle = find_candidate(report.get("diagnostic_candidates", []), "yclecount") or \
             find_candidate(report.get("diagnostic_candidates", []), "ycle count")
     value = _num(cycle[0].get("value")) if cycle else None
+    high = value is not None and value >= 500
     check = SubsystemCheck(
         subsystem="battery",
         question="Battery cycle count as exposed by the device diagnostics relay",
         test="idevicediagnostics diagnostics GasGauge (when supported)",
         source="GasGauge diagnostic candidate" if cycle else "",
+        collector="diagnostics-gauge" if cycle else "",
         measurement=value,
+        normalized_value=float(value) if value is not None else None,
         measurement_unit="cycles" if value is not None else "",
         expected="Apple does not publish a universal cycle limit; iOS surfaces a service notice when warranted.",
         observed=f"CycleCount={int(value)}" if value is not None else "",
-        status="pass_with_warnings" if (value is not None and value >= 500) else
-               ("pass" if value is not None else "not_tested"),
+        status="pass_with_warnings" if high else ("pass" if value is not None else "not_tested"),
+        severity="REVIEW" if high else "INFO",
         confidence="medium" if value is not None else "none",
         explanation="Cycle count is a wear indicator. Compare with the buyer-reported age of the phone.",
+        # --- evidence trail (docs/v5/05)
+        check_id="battery.cycle_count",
+        collected_at=utc_now() if value is not None else "",
+        interpretation=("A cycle count is the number of complete charge/discharge cycles the battery "
+                        "has been through. It is a wear indicator, not a health grade: a high count on an "
+                        "old phone is ordinary, and a low count is not proof of a genuine battery." if value is not None
+                        else "No cycle count was available, so battery wear is unknown."),
+        thresholds=("Heuristic, not documented: 500 cycles is a common service threshold in the repair "
+                    "industry. Apple's own position is that iOS surfaces a service notice when warranted, "
+                    "so no universal limit is claimed here." if value is not None else ""),
+        limitations=("Cycle count cannot distinguish a genuine battery from a replacement, and a low count "
+                     "can be reset by software. It says nothing about capacity retention." ),
+        reasoning=("Compared the device-reported CycleCount against a 500-cycle industry heuristic; "
+                   "the comparison is labelled as a heuristic because Apple publishes no universal limit."
+                   if value is not None else "No value was collected, so no interpretation was reached."),
     )
     if value is None:
         check.explanation = ("The connected device/tool combination did not expose a cycle count through "
-                             "supported diagnostics. Verify manually in Settings → Battery → Battery Health & Charging.")
+                             "supported diagnostics. Verify manually in Settings → Battery → Battery Health & Charging. "
+                             "An uncollected metric is an evidence gap, never evidence of a replaced battery.")
         check.requires_hands_on = True
+        check.limitations = ("Absence of a cycle count says nothing about the battery's history. It is not "
+                             "evidence of a replacement, and not evidence of an original.")
     if value is not None and value >= 500:
         check.severity = "REVIEW"
         check.next_test = "Confirm Battery Health percentage in Settings and record it in the buyer checklist."
@@ -116,6 +140,21 @@ def battery_checks(report: dict[str, Any]) -> list[SubsystemCheck]:
         confidence="low" if capacity is not None else "none",
         explanation=("Raw capacity fields need unit verification against the tool version; do not treat an "
                      "unlabeled number as a percentage of design capacity."),
+        # --- evidence trail (docs/v5/05)
+        check_id="battery.max_capacity",
+        collector="diagnostics-gauge" if cap else "",
+        collected_at=utc_now() if capacity is not None else "",
+        normalized_value=float(capacity) if capacity is not None else None,
+        interpretation=("Maximum capacity is the charge the battery can currently hold, expressed against "
+                        "its design capacity. A figure below design capacity is wear, not a fault."
+                        if capacity is not None else "No capacity figure was available, so retention is unknown."),
+        thresholds=("Documented basis: design capacity is model-specific and published by Apple per model. "
+                    "No universal percentage threshold is claimed." if capacity is not None else ""),
+        limitations=("A capacity figure without a verified unit cannot be compared to design capacity, and "
+                     "even a verified figure says nothing about the battery's provenance."),
+        reasoning=("Took the device-reported capacity field and recorded its unit as reported; no percentage "
+                   "was computed because the unit could not be verified against the tool version."
+                   if capacity is not None else "No value was collected, so no interpretation was reached."),
     )
     if capacity is None:
         cap_check.explanation = ("Device did not expose a capacity figure through supported diagnostics. "
@@ -141,6 +180,18 @@ def storage_checks(report: dict[str, Any]) -> list[SubsystemCheck]:
         measurement=total_gb,
         measurement_unit="decimal GB (normalized from bytes)",
         expected="Matches the advertised tier (16/32/64/128/256/512 GB / 1 TB families).",
+        check_id="storage.total_capacity",
+        collector="device-info",
+        collected_at=utc_now() if total is not None else "",
+        normalized_value=total_gb,
+        interpretation=("Total physical storage is the NAND capacity iOS reports, normalized from bytes to "
+                        "decimal GB. It is a capacity figure, not a health figure." if total is not None
+                        else "No capacity was reported, so storage is unknown."),
+        thresholds="Documented basis: advertised tiers are published by Apple per model.",
+        limitations="A capacity figure says nothing about how the storage was used or whether it was replaced.",
+        reasoning=("Normalized the byte count iOS reported into decimal GB using 1e9 bytes per GB; the "
+                   "conversion is documented, not heuristic." if total is not None
+                   else "No value was collected, so no interpretation was reached."),
         observed=f"{total_gb} GB" if total_gb is not None else "",
         status="pass_with_warnings" if total_gb is not None else "not_tested",
         confidence="medium" if total_gb is not None else "none",
@@ -154,9 +205,23 @@ def storage_checks(report: dict[str, Any]) -> list[SubsystemCheck]:
         question="Usable data capacity vs physical capacity (heuristic NAND-consistency hint)",
         test="Derived comparison of TotalDiskCapacity vs TotalDataCapacity",
         source="device-info plist",
+        collector="device-info",
+        collected_at=utc_now() if data is not None else "",
+        normalized_value=data_gb,
         measurement=data_gb,
         measurement_unit="decimal GB",
         expected="Data capacity should be somewhat below disk capacity on every real device.",
+        check_id="storage.data_vs_disk",
+        interpretation=("Comparing the two capacity fields iOS reports from different subsystems is a "
+                        "consistency hint: on a genuine device the usable figure sits below the physical one."
+                        if data_gb is not None else "No capacity was reported, so the hint cannot be evaluated."),
+        thresholds=("Heuristic, not documented: no Apple document states the expected gap. The comparison "
+                    "is reported as a hint only." if data_gb is not None else ""),
+        limitations=("A mismatch is a prompt to look in Settings, not an accusation. It can be caused by "
+                     "iOS version reporting differences, and a match proves nothing on its own."),
+        reasoning=("Compared the two iOS-reported capacity fields; the rule is labelled a heuristic because "
+                   "Apple documents no expected relationship." if data_gb is not None
+                   else "No value was collected, so no interpretation was reached."),
         observed=f"disk={total_gb} GB, data={data_gb} GB" if total_gb is not None or data_gb is not None else "",
         status="pass_with_warnings" if (total_gb and data_gb and data_gb < total_gb) else
                ("degraded" if (total_gb and data_gb and data_gb >= total_gb) else "not_tested"),
@@ -315,3 +380,32 @@ def assess_hardware(report: dict[str, Any]) -> dict[str, Any]:
                        "figure, not an independent measurement. No checklist here certifies authenticity, health, or "
                        "water resistance."),
     }
+
+
+def audit_battery_claims(report: dict[str, Any]) -> list[str]:
+    """Enforce the `battery_metric` claim rule (docs/v5/06).
+
+    A battery value is claimable only as a unit-verified candidate with its source
+    cited. A bare number with no unit is exactly the unlabelled value the claim
+    matrix says to refuse, so it is reported as a violation rather than presented
+    as a measurement.
+    """
+    from .capabilities import fallback_for
+
+    violations: list[str] = []
+    hardware = report.get("hardware_assessment")
+    if not isinstance(hardware, dict):
+        return violations
+    for check in hardware.get("checks") or []:
+        if not isinstance(check, dict):
+            continue
+        if str(check.get("subsystem", "")).lower() != "battery":
+            continue
+        if check.get("status") in {"not_tested", "unsupported", "not_applicable"}:
+            continue
+        # A measurement without a recorded unit is an unlabelled number.
+        if check.get("measurement") is not None and not str(check.get("measurement_unit") or "").strip():
+            violations.append(
+                f"battery_metric: {check.get('question')!r} asserts a value with no unit "
+                f"-> {fallback_for('battery_metric')}")
+    return violations
