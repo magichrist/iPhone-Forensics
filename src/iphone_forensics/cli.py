@@ -397,6 +397,12 @@ def _run_inspect(namespace: argparse.Namespace, output: str) -> int:
     if invalid is not None:
         return invalid
 
+    # Validate --device before anything is created, so a bad value costs nothing
+    # and cannot produce a run directory full of collection errors.
+    invalid_device = _resolve_device_argument(namespace)
+    if invalid_device is not None:
+        return invalid_device
+
     device = _flag_value(namespace, "device")
     # Offline paths (`--backup-dir` / `--mvt-backup`) analyse supplied artifacts
     # and never touch a device, so neither device discovery nor the consent
@@ -439,26 +445,108 @@ def _run_inspect(namespace: argparse.Namespace, output: str) -> int:
                 print("No device selected; nothing was inspected.")
                 return EXIT_AMBIGUOUS_DEVICE
             device = chosen
-            return _dispatch_inspect(namespace, output, device, granted, explicit)
+            return _dispatch_inspect(namespace, output, device, granted, explicit,
+                                     announce=True)
 
     sensitive, explicit = _resolve_sensitive(namespace)
     return _dispatch_inspect(namespace, output, device, sensitive, explicit)
 
 
+def _looks_like_udid(value: str) -> bool:
+    """True when *value* has the shape of a device UDID.
+
+    Observed forms, with and without the dash:
+
+    * ``00008030-001234567890ABCD`` — 8 hex + dash + 16 hex, what
+      ``idevice_id -l`` and libimobiledevice report (25 chars, 24 hex digits).
+    * ``udid-00008030001234567890ABCD…`` — the prefixed form some tools emit.
+    * 16- and 40-hex forms appear in older and vendor tooling.
+
+    Anything else — a menu number like ``1``, a path, a name — is not a UDID and
+    must never be handed to the collectors as one. The earlier version of this
+    check only accepted 40 hex digits and so rejected the common 24-digit form,
+    turning every real UDID into a usage error.
+    """
+    compact = str(value).strip().lower()
+    if compact.startswith("udid-"):
+        compact = compact[5:]
+    compact = compact.replace("-", "")
+    if len(compact) < 8 or not all(char in "0123456789abcdef" for char in compact):
+        return False
+    # Lengths actually seen: 24 (idevice_id), 16, 32, 40. A bare 8-hex value is
+    # also the device's ECID tail and is accepted by the collectors.
+    return len(compact) in (8, 16, 24, 32, 40)
+
+
+def _resolve_device_argument(namespace: argparse.Namespace) -> int | None:
+    """Reject a `--device` value that cannot be a UDID, before any run starts.
+
+    `--device 1` was taken literally as a UDID, so every collector ran against a
+    device that does not exist and the run produced a wall of collection errors
+    with an empty device record. A selection number is a reasonable thing to type,
+    so it is resolved to a real UDID when there is exactly one choice, and
+    rejected with the actual UDIDs listed when the input is not a device at all.
+    """
+    raw = _flag_value(namespace, "device")
+    if not raw:
+        return None
+    device = str(raw).strip()
+    if _looks_like_udid(device):
+        return None
+
+    # Not a UDID. If it is a menu number, resolve it against what is attached.
+    if device.isdigit():
+        devices = _probe_devices() or []
+        index = int(device)
+        if devices and 1 <= index <= len(devices):
+            print(f"--device {device} resolved to device {index} of {len(devices)}: "
+                  f"{redact(devices[index - 1])}")
+            _set_device(namespace, devices[index - 1])
+            return None
+        listing = "\n".join(f"  {n}. {redact(u)}" for n, u in enumerate(devices, 1)) \
+            or "  (no devices detected — run `iphone-forensics doctor`)"
+        print(f"error: --device {device!r} is not a device number in range and not a UDID.",
+              file=sys.stderr)
+        print(f"Connected devices:\n{listing}", file=sys.stderr)
+        print("Pass a UDID (Settings → General → About → Serial Number), or omit "
+              "--device to select interactively.", file=sys.stderr)
+        return EXIT_CONFIG
+
+    print(f"error: --device {device!r} is not a UDID.", file=sys.stderr)
+    print("A UDID is the device's Serial Number as shown in "
+          "Settings → General → About, or the last 8 characters of it.", file=sys.stderr)
+    return EXIT_CONFIG
+
+
+def _set_device(namespace: argparse.Namespace, udid: str) -> None:
+    """Record the resolved UDID on the namespace under every name it is read by."""
+    setattr(namespace, "device", udid)
+    setattr(namespace, "udid", udid)
+
+
 def _dispatch_inspect(namespace: argparse.Namespace, output: str, device: str | None,
-                      sensitive: bool, explicit: frozenset[str]) -> int:
-    """Hand the resolved device and consent decision to the engine."""
-    if sensitive:
-        print("Sensitive collection enabled for this run by consent.")
-    elif granted_explicitly := explicit:
-        print("Sensitive collectors explicitly requested: "
-              + ", ".join(sorted(f"--{dest.replace('_', '-')}" for dest in granted_explicitly))
-              + " — every other sensitive collector stays off.")
-    elif not _is_tty():
-        print("Non-interactive session: sensitive collection skipped "
-              "(status: skipped_by_user). Re-run with --yes-sensitive to include it.")
-    else:
-        print("Sensitive collection declined; standard read-only profile only.")
+                      sensitive: bool, explicit: frozenset[str],
+                      *, announce: bool = False) -> int:
+    """Hand the resolved device and consent decision to the engine.
+
+    `announce` is False for the `_resolve_sensitive` path, which has already
+    explained the decision it reached. Printing it a second time here made a
+    consented run say "Sensitive collection enabled" twice, which reads like the
+    scope was granted twice. The single-prompt path passes True because it has not
+    printed anything yet.
+    """
+    if announce:
+        if sensitive:
+            print("Sensitive collection enabled for this run by consent.")
+        elif granted_explicitly := explicit:
+            print("Sensitive collectors explicitly requested: "
+                  + ", ".join(sorted(f"--{dest.replace('_', '-')}" for dest in granted_explicitly))
+                  + " — every other sensitive collector stays off.")
+        elif not _is_tty():
+            print("Non-interactive session: sensitive collection skipped "
+                  "(status: skipped_by_user). Re-run with --yes-sensitive to include it.")
+        else:
+            print("Sensitive collection declined; standard read-only profile only.")
     return cmd_inspect(_engine_args(namespace, output=output, device=device,
                                     sensitive=sensitive, explicit=explicit))
 

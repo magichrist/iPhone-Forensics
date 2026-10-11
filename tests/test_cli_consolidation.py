@@ -125,6 +125,93 @@ def test_config_defaults_do_not_count_as_legacy_flags(monkeypatch):
     assert seen == [False], "config-supplied defaults were mistaken for user flags"
 
 
+# ------------------------------------------------------- --device validation
+
+@pytest.mark.parametrize("value,expected", [
+    ("1", False), ("0", False), ("9", False), ("abc", False),
+    ("banana", False), ("/tmp/x", False), ("", False),
+    ("00008030-001234567890ABCD", True),      # what idevice_id reports
+    ("00008030001234567890ABCD", True),
+    ("udid-00008030001234567890ABCD", True),
+    ("F96E1B0F-1A2B3C4D5E6F7081", True),
+])
+def test_udid_shape_detection(value: str, expected: bool):
+    assert cli._looks_like_udid(value) is expected, value
+
+
+def test_real_udid_formats_are_accepted(monkeypatch):
+    """A first draft only allowed 40 hex digits and rejected the common
+    24-digit form, turning every genuine UDID into a usage error."""
+    cli._probe_devices = lambda: ["00008030-001234567890ABCD"]
+    namespace = cli._build_parser().parse_args(["inspect", "--device", "00008030-001234567890ABCD"])
+    assert cli._resolve_device_argument(namespace) is None
+
+
+def test_device_number_resolves_to_the_attached_device(monkeypatch):
+    """`--device 1` must not be passed to the collectors as a literal UDID."""
+    monkeypatch.setattr(cli, "_probe_devices", lambda: ["00008030-001234567890ABCD"])
+    namespace = cli._build_parser().parse_args(["inspect", "--device", "1"])
+    assert cli._resolve_device_argument(namespace) is None
+    assert namespace.device == "00008030-001234567890ABCD"
+
+
+def test_out_of_range_device_number_is_rejected(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_probe_devices", lambda: ["00008030-001234567890ABCD"])
+    namespace = cli._build_parser().parse_args(["inspect", "--device", "9"])
+    assert cli._resolve_device_argument(namespace) == cli_v4.EXIT_CONFIG
+    err = capsys.readouterr().err
+    assert "not a device number in range" in err
+    assert "00008030" not in err, "the raw UDID must be redacted even in an error"
+
+
+def test_non_udid_device_value_is_rejected(monkeypatch, capsys):
+    cli._probe_devices = lambda: ["00008030-001234567890ABCD"]
+    namespace = cli._build_parser().parse_args(["inspect", "--device", "banana"])
+    assert cli._resolve_device_argument(namespace) == cli_v4.EXIT_CONFIG
+    assert "not a UDID" in capsys.readouterr().err
+
+
+def test_bad_device_never_starts_a_run(monkeypatch):
+    """A bad --device must cost nothing and write no report."""
+    monkeypatch.setattr(cli, "_probe_devices", lambda: ["00008030-001234567890ABCD"])
+    monkeypatch.setattr(cli, "cmd_inspect",
+                        lambda args: (_ for _ in ()).throw(
+                            AssertionError("a rejected --device must not inspect")))
+    assert cli.main(["inspect", "--device", "banana"]) == cli_v4.EXIT_CONFIG
+
+
+# ------------------------------------------------------------ consent printing
+
+def test_consent_message_prints_exactly_once(monkeypatch, capsys):
+    """The prompt path announced consent twice.
+
+    `_resolve_sensitive` prints the decision it reached and `_dispatch_inspect`
+    printed it again, so a consented run said "Sensitive collection enabled for
+    this run by consent." two lines running.
+    """
+    monkeypatch.setattr(builtins, "input", lambda prompt="": "y")
+    monkeypatch.setattr(sys, "stdin", io.StringIO())
+    monkeypatch.setattr(cli, "_is_tty", lambda stream=None: True)
+    monkeypatch.setattr(cli, "_probe_devices", lambda: ["00008030-001234567890ABCD"])
+    monkeypatch.setattr(cli, "cmd_inspect", lambda args: 0)
+    cli.main(["inspect"])
+    out = capsys.readouterr().out
+    assert out.count("Sensitive collection enabled for this run by consent.") == 1, out
+
+
+def test_consent_message_prints_once_via_single_prompt(monkeypatch, capsys):
+    """Same for the combined device+consent prompt."""
+    monkeypatch.setattr(builtins, "input", lambda prompt="": "1 y")
+    monkeypatch.setattr(sys, "stdin", io.StringIO())
+    monkeypatch.setattr(cli, "_is_tty", lambda stream=None: True)
+    monkeypatch.setattr(cli, "_probe_devices",
+                        lambda: ["00008030-001234567890ABCD", "00008030-001234567890ABCE"])
+    monkeypatch.setattr(cli, "cmd_inspect", lambda args: 0)
+    cli.main(["inspect"])
+    out = capsys.readouterr().out
+    assert out.count("Sensitive collection enabled for this run by consent.") == 1, out
+
+
 def test_both_compare_forms_reach_the_engine(tmp_path, monkeypatch):
     """End-to-end through dispatch, not just parsing."""
     previous = tmp_path / "a.json"
