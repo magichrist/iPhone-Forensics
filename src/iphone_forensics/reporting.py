@@ -310,7 +310,7 @@ def _claim_matrix_panel() -> str:
     """What this tool may claim, and what it says instead when it cannot.
 
     Rendered from `capabilities.CLAIM_MATRIX`, the single source of truth shared
-    with `iphone-surgery capabilities`, so the report and the CLI can never
+    with `iphone-forensics capabilities`, so the report and the CLI can never
     disagree about the limits of the evidence.
     """
     rows = [[row["claim"], row["requires"], row["otherwise"]]
