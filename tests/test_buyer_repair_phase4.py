@@ -57,7 +57,7 @@ def test_rule1_critical_fail_verdict_is_avoid_purchase():
     data["checks"]["activation_lock"]["status"] = "fail"
     result = evaluate_v4(data)
     assert result["verdict"] == "AVOID_PURCHASE"
-    assert "rule 1" in result["rule"]
+    assert "buyer.critical_failure" in result["rule"] and "v1" in result["rule"]
     assert result["critical_failures"] == ["activation_lock"]
 
 
@@ -69,7 +69,7 @@ def test_rule2_fewer_than_three_answered_verdict_is_insufficient_evidence():
     data["checks"]["cameras"]["status"] = "pass"
     result = evaluate_v4(data)
     assert result["verdict"] == "INSUFFICIENT_EVIDENCE"
-    assert "rule 2" in result["rule"]
+    assert "buyer.insufficient_evidence" in result["rule"] and "v1" in result["rule"]
 
 
 def test_rule3_critical_unknown_verdict_is_investigate_further():
@@ -81,7 +81,7 @@ def test_rule3_critical_unknown_verdict_is_investigate_further():
     data["checks"]["carrier_eligibility"]["status"] = "not_tested"
     result = evaluate_v4(data)
     assert result["verdict"] == "INVESTIGATE_FURTHER"
-    assert "rule 3" in result["rule"]
+    assert "buyer.critical_unknowns" in result["rule"] and "v1" in result["rule"]
     assert result["critical_unknown"] == ["carrier_eligibility"]
 
 
@@ -90,7 +90,7 @@ def test_rule4_noncritical_fail_verdict_is_buy_only_after_repair():
     data["checks"]["display_touch"]["status"] = "fail"
     result = evaluate_v4(data)
     assert result["verdict"] == "BUY_ONLY_AFTER_REPAIR"
-    assert "rule 4" in result["rule"]
+    assert "buyer.noncritical_failures" in result["rule"] and "v1" in result["rule"]
     assert result["noncritical_failures"] == ["display_touch"]
 
 
@@ -100,7 +100,7 @@ def test_rule5_clean_checklist_verdict_is_good_candidate():
         data["checks"][check_id]["status"] = "pass"
     result = evaluate_v4(data)
     assert result["verdict"] == "GOOD_CANDIDATE"
-    assert "rule 5" in result["rule"]
+    assert "buyer.no_recorded_failures" in result["rule"] and "v1" in result["rule"]
 
 
 def test_every_verdict_in_enum_is_reachable():

@@ -700,7 +700,6 @@ def test_v4_deep_links_still_land_on_the_right_section(tmp_path: Path):
         assert expected in ids, f"old heading {old_heading!r} has no anchor"
 
     # And the alias table is honest: every target really is a rendered section.
-    from iphone_forensics.reporting import SECTION_TITLES
     rendered = set(re.findall(r"<h2(?: id='[^']*')?>\d+\.\s*([^<]+)</h2>", html))
     for _old, new in SECTION_ALIASES:
         assert new in rendered, f"{new!r} is aliased to but never rendered"

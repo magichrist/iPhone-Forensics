@@ -48,7 +48,7 @@ def test_cli_buyer_critical_unknowns_outrank_noncritical_failures(tmp_path: Path
         "physical_damage": {"status": "fail"}}}))
     result = _run_cli("buyer", "--checklist-json", str(checklist))
     assert "INVESTIGATE_FURTHER" in result.stdout
-    assert "rule 3" in result.stdout
+    assert "buyer.critical_unknowns" in result.stdout
 
 
 def test_cli_hardware_on_existing_report(tmp_path: Path):

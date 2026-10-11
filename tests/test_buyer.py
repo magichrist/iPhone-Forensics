@@ -8,9 +8,24 @@ def test_template_has_all_checklist_items():
 
 
 def test_unknown_critical_checks_hold_payment():
-    result = evaluate(template())
+    """v4 rule engine: enough items answered, critical ones still unknown → hold."""
+    data = template()
+    for item in CHECKLIST:
+        if item["id"] in {"battery_health", "cameras", "display_touch"}:
+            data["checks"][item["id"]]["status"] = "pass"
+    result = evaluate(data)
     assert result["verdict"] == "INCOMPLETE — HOLD PAYMENT"
     assert result["critical_unknowns"]
+    assert result["rule_engine"]["fired"] == "buyer.critical_unknowns"
+
+
+def test_fewer_than_three_answered_is_insufficient_evidence():
+    """v4: rule 2 takes precedence over critical unknowns when barely answered."""
+    data = template()
+    data["checks"]["battery_health"]["status"] = "pass"
+    result = evaluate(data)
+    assert result["verdict"] == "INCOMPLETE — EVIDENCE GAPS REMAIN"
+    assert result["rule_engine"]["fired"] == "buyer.insufficient_evidence"
 
 
 def test_critical_failure_is_high_risk():
