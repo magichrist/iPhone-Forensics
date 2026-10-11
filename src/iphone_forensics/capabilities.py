@@ -427,6 +427,64 @@ FORBIDDEN_INFERENCES: list[dict[str, str]] = [
 
 # --------------------------------------------------------------------- helpers
 
+# Which capability category each collector actually feeds.
+#
+# This mapping replaces a substring test that asked whether a category name was
+# contained in a collector's name ("battery" in "device-info-xml"). No real
+# collector name contains any category, so the coverage table rendered a
+# permanent zero for every category — the chart could never show that the
+# standard profile really did collect GasGauge battery telemetry.
+#
+# Keys are matched exactly against the collector's `name`. Keys ending in "-*"
+# are prefixes, which is how the parameterised collectors are covered.
+COLLECTOR_CATEGORY: dict[str, str] = {
+    "pairing-validation": "identity",
+    "device-info-xml": "identity",
+    "device-info-key-values": "identity",
+    "capability_catalog": "identity",
+    # The diagnostics subsets carry real subsystem telemetry: GasGauge is battery,
+    # NAND is storage, WiFi is connectivity. These are the collectors that make
+    # the battery/storage rows in the coverage table non-zero.
+    "diagnostics-GasGauge": "battery",
+    "diagnostics-NAND": "storage",
+    "diagnostics-WiFi": "connectivity",
+    "diagnostics-All": "identity",
+    "ioreg-IOPower": "battery",
+    "ioreg-IODeviceTree": "identity",
+    "ioreg-IOService": "identity",
+    "installed-apps-*": "ownership",
+    "provisioning-profiles": "ownership",
+    "processes": "ownership",
+    "live-syslog": "malware",
+    "live-syslog-pymobiledevice3": "malware",
+    "full-backup-*": "malware",
+    "libimobiledevice-full-backup": "malware",
+    "crash-report-copy": "physical",
+    "pmd-crash-reports": "physical",
+}
+
+
+def category_for_collector(name: str) -> str | None:
+    """Capability category a collector contributes to, or None if it feeds none.
+
+    Exact match first, then longest matching ``prefix-*`` key, so a specific
+    entry always beats a wildcard.
+    """
+    if not name:
+        return None
+    exact = COLLECTOR_CATEGORY.get(name)
+    if exact:
+        return exact
+    best: tuple[int, str] | None = None
+    for key, category in COLLECTOR_CATEGORY.items():
+        if not key.endswith("-*"):
+            continue
+        prefix = key[:-1]
+        if name.startswith(prefix) and (best is None or len(prefix) > best[0]):
+            best = (len(prefix), category)
+    return best[1] if best else None
+
+
 def get_matrix() -> list[dict[str, str]]:
     """Full matrix as a fresh list of shallow copies — callers cannot mutate module data."""
     return [dict(row) for row in CAPABILITIES]

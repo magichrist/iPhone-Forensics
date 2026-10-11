@@ -17,8 +17,10 @@ pymobiledevice3 = ["pymobiledevice3>=7"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
+# One binary. The former second entry point, `iphone-surgery`, was retired: every
+# command it offered is accepted by `iphone-forensics`, and keeping two names for
+# one tool only invited the two to drift apart.
 iphone-forensics = "iphone_forensics.cli:main"
-iphone-surgery = "iphone_forensics.cli_v4:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

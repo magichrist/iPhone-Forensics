@@ -222,7 +222,11 @@ def test_welcome_no_args(tmp_path: Path):
     assert "Traceback (most recent call last)" not in result.stderr, result.stderr
 
     assert __version__ in result.stdout, f"version missing from welcome screen:\n{result.stdout}"
-    assert "iphone-surgery" in result.stdout
+    # The unified CLI's own name. `iphone-surgery` was merged into it and must
+    # not be advertised as a separate tool.
+    assert "iphone-forensics" in result.stdout
+    assert "iphone-surgery" not in result.stdout, (
+        f"welcome screen still advertises the retired name:\n{result.stdout}")
     assert any(marker in result.stdout for marker in (
         "Operational mode", "Device discovery", "doctor", "inspect --backup-dir",
     )), f"welcome must state toolchain/device state or a next action:\n{result.stdout}"

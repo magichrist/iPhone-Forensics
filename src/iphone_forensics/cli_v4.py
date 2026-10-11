@@ -40,7 +40,10 @@ from .reporting import finalize
 from .util import redact as util_redact
 from .util import run_command, write_json
 
-PROGRAM = "iphone-surgery"
+PROGRAM = "iphone-forensics"
+# The engine's former standalone name. Kept only so the deprecated `iphone-surgery`
+# entry point can still build a parser that says so in its own help text.
+LEGACY_PROGRAM = "iphone-surgery"
 CONFIG_FILENAME = "iphone-surgery.json"
 # Empty string = the current working directory: Path("") resolves to the CWD,
 # so the default needs no special case in any consumer.
@@ -1149,7 +1152,11 @@ def _finish_run(run_dir: Path, report: dict[str, Any], buyer_data: dict[str, Any
                 report["comparison"] = compare_reports(previous, report)
                 integrity = assess_integrity(previous, report, buyer_data)
                 report["integrity_assessment"] = integrity
-                report["findings"].extend(integrity["findings"])
+                # Integrity findings are added in stage 4 below, once the
+                # assessment has been classified. Adding them here as well
+                # duplicated every suspicious/change_detected finding — BLOCKERs
+                # included — because `derive_findings` preserves what is already
+                # on the list.
             else:
                 report["findings"].append({"severity": "WARNING",
                     "title": "Comparison input is not a JSON object", "detail": "", "evidence": []})
@@ -1254,35 +1261,37 @@ def _print_summary(run_dir: Path, report: dict[str, Any], console: _Console | No
 
 # ------------------------------------------------------------------- parser
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog=PROGRAM,
-        description=("Hardware-first iPhone inspection, integrity assessment, and buyer/repair workflows. "
-                     "Safe, read-only by default; works offline against existing backups/evidence."),
-        epilog=("Examples:\n"
-                "  iphone-surgery doctor\n"
-                "  iphone-surgery devices\n"
-                "  iphone-surgery inspect --buyer-json ~/checklist.json\n"
-                "  iphone-surgery inspect --backup-dir ~/backup-2026-01-01 --redact\n"
-                "  iphone-surgery integrity --previous old.json --current new.json\n"
-                "  iphone-surgery evidence-verify ./iphone-audit-20260101-120000\n"
-                "\n"
-                f"Config: ./{CONFIG_FILENAME} is auto-loaded when present; --config PATH overrides it.\n"
-                "Precedence: CLI flag > --config PATH > "
-                f"./{CONFIG_FILENAME} > built-in defaults.\n"))
-    parser.add_argument("--version", action="version", version=f"iphone-surgery {__version__}")
-    parser.add_argument("--config", metavar="PATH",
-                        help=f"Load configuration JSON from PATH (default: ./{CONFIG_FILENAME} when present)")
-    parser.add_argument("--interactive", action="store_true",
-                        help="Prompt for the next action on the welcome screen (only when stdin is a TTY)")
-    parser.add_argument("--output", default=argparse.SUPPRESS,
-                        help="Output root directory (default: the current working directory; "
-                             "config: output_root)")
-    parser.add_argument("--quiet", action="store_true", default=argparse.SUPPRESS,
-                        help="Suppress progress chatter; print only the summary and errors.")
-    parser.add_argument("--verbose", action="store_true", default=argparse.SUPPRESS,
-                        help="Extra detail: per-collector name/status/seconds and stage timing.")
-    sub = parser.add_subparsers(dest="command")
+class _NullParser:
+    """Stand-in returned by :func:`add_subcommands` for a command the caller owns.
+
+    Every method is a no-op, so a skipped registration block still reads as
+    straight-line code. It deliberately does **not** subclass
+    ``argparse.ArgumentParser``: it must never surface in ``--help``.
+    """
+
+    def add_argument(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def set_defaults(self, **kwargs: Any) -> None:
+        return None
+
+    def add_mutually_exclusive_group(self, *args: Any, **kwargs: Any) -> "_NullParser":
+        return self
+
+    def add_argument_group(self, *args: Any, **kwargs: Any) -> "_NullParser":
+        return self
+
+
+def add_subcommands(sub: Any, *, skip: frozenset[str] = frozenset()) -> None:
+    """Register every advanced subcommand on *sub*.
+
+    Split out of :func:`build_parser` so the unified ``iphone-forensics`` parser
+    can mount these same definitions next to its own curated commands, rather
+    than the project shipping two CLIs that each declare their own surface.
+    ``skip`` lets the caller withhold a command it defines itself.
+    """
+    def add(name: str, **kwargs: Any) -> Any:
+        return _NullParser() if name in skip else sub.add_parser(name, **kwargs)
 
     def _common(p):
         """Flags every subcommand accepts, so they work after the subcommand name too."""
@@ -1298,15 +1307,15 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--verbose", action="store_true", default=argparse.SUPPRESS,
                        help="Extra detail: per-collector name/status/seconds and stage timing.")
 
-    p = sub.add_parser("doctor", help="Check toolchain, pairing, and device reachability")
+    p = add("doctor", help="Check toolchain, pairing, and device reachability")
     _common(p)
     p.set_defaults(func=cmd_doctor)
 
-    p = sub.add_parser("devices", help="List connected devices (redacted in console)")
+    p = add("devices", help="List connected devices (redacted in console)")
     _common(p)
     p.set_defaults(func=cmd_devices)
 
-    p = sub.add_parser("inspect", help="Full device inspection (device connected or --backup-dir offline)")
+    p = add("inspect", help="Full device inspection (device connected or --backup-dir offline)")
     _common(p)
     p.add_argument("--device", help="Target UDID when multiple devices are connected")
     p.add_argument("--buyer-json", help="Load buyer checklist from JSON")
@@ -1330,30 +1339,30 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Always exit 0 on completed runs regardless of findings")
     p.set_defaults(func=cmd_inspect)
 
-    p = sub.add_parser("integrity", help="Classify changes between two report snapshots")
+    p = add("integrity", help="Classify changes between two report snapshots")
     p.add_argument("--previous", required=True, help="Previous report.json")
     p.add_argument("--current", required=True, help="Current report.json")
     p.add_argument("--out", help="Write full assessment JSON here")
     p.set_defaults(func=cmd_integrity)
 
-    p = sub.add_parser("evidence-verify", help="Verify artifacts against a manifest")
+    p = add("evidence-verify", help="Verify artifacts against a manifest")
     p.add_argument("target", help="Run directory or manifest.json path")
     p.set_defaults(func=cmd_evidence_verify)
 
-    p = sub.add_parser("report", help="Regenerate HTML from an existing report.json")
+    p = add("report", help="Regenerate HTML from an existing report.json")
     p.add_argument("report", help="Path to report.json")
     p.add_argument("--redact", action="store_true", help="Also emit redacted copies")
     p.set_defaults(func=cmd_report)
 
-    p = sub.add_parser("tools", help="Show detected toolchain")
+    p = add("tools", help="Show detected toolchain")
     p.set_defaults(func=cmd_tools)
 
-    p = sub.add_parser("checklist", help="Write a buyer checklist template")
+    p = add("checklist", help="Write a buyer checklist template")
     p.add_argument("--out", help="Target path (default ./buyer-checklist.json)")
     p.add_argument("--force", action="store_true", help="Overwrite existing file")
     p.set_defaults(func=cmd_checklist)
 
-    p = sub.add_parser("case", help="Repair-case workflow: intake, work log, pre/post compare, QA, close")
+    p = add("case", help="Repair-case workflow: intake, work log, pre/post compare, QA, close")
     p.add_argument("case_file", help="JSON file storing the case (created if missing)")
     p.add_argument("--case-id", help="Case identifier when creating")
     p.add_argument("--symptoms", help="Customer-reported symptoms text")
@@ -1372,70 +1381,103 @@ def build_parser() -> argparse.ArgumentParser:
                         "(human progress lines move to stderr for this run)")
     p.set_defaults(func=cmd_case)
 
-    p = sub.add_parser("manual-tests", help="Print the guided manual hardware tests")
+    p = add("manual-tests", help="Print the guided manual hardware tests")
     p.set_defaults(func=cmd_manual_tests)
 
-    p = sub.add_parser("buyer", help="Evaluate a buyer checklist and print the v4 verdict")
+    p = add("buyer", help="Evaluate a buyer checklist and print the v4 verdict")
     p.add_argument("--checklist-json", help="Path to a filled/edited buyer-checklist JSON")
     p.add_argument("--json", action="store_true", help="Also print the machine-readable result")
     p.add_argument("--out", help="Write the verdict JSON here")
     p.set_defaults(func=cmd_buyer)
 
-    p = sub.add_parser("hardware", help="Re-run hardware-health assessment on an existing report.json")
+    p = add("hardware", help="Re-run hardware-health assessment on an existing report.json")
     p.add_argument("report", help="Path to report.json")
     p.add_argument("--json", action="store_true", help="Print the machine-readable assessment")
     p.add_argument("--out", help="Write assessment JSON here")
     p.set_defaults(func=cmd_hardware)
 
-    p = sub.add_parser("diagnose", help="Decision-tree next steps from an existing report")
+    p = add("diagnose", help="Decision-tree next steps from an existing report")
     p.add_argument("report", help="Path to report.json")
     p.set_defaults(func=cmd_diagnose)
 
-    p = sub.add_parser("capabilities", help="Print the capability matrix: automated/partial/manual/not-verifiable")
+    p = add("capabilities", help="Print the capability matrix: automated/partial/manual/not-verifiable")
     p.set_defaults(func=cmd_capabilities)
 
-    p = sub.add_parser("compare", help="Field- and integrity-level comparison of two reports")
+    p = add("compare", help="Field- and integrity-level comparison of two reports")
     p.add_argument("--previous", required=True, help="Previous report.json")
     p.add_argument("--current", required=True, help="Current report.json")
     p.add_argument("--out", help="Write combined comparison JSON here")
     p.set_defaults(func=cmd_compare)
 
-    p = sub.add_parser("config", help="Write or validate the tool configuration "
+    p = add("config", help="Write or validate the tool configuration "
                                    "(default output_root: <current-working-directory>)")
     p.add_argument("--check", help="Validate an existing config file")
     p.add_argument("--out", help="Where to write the template (default ./iphone-surgery.json)")
     p.add_argument("--force", action="store_true", help="Overwrite")
     p.set_defaults(func=cmd_config)
 
+
+def add_global_flags(parser: argparse.ArgumentParser) -> None:
+    """Flags accepted before the subcommand name.
+
+    Shared by the engine parser and the unified ``iphone-forensics`` parser so
+    the two cannot drift. Every one uses ``default=SUPPRESS``: a subparser default
+    would otherwise clobber a value parsed before the command name.
+    """
+    parser.add_argument("--config", metavar="PATH", default=argparse.SUPPRESS,
+                        help=f"Load configuration JSON from PATH (default: ./{CONFIG_FILENAME} when present)")
+    parser.add_argument("--output", default=argparse.SUPPRESS,
+                        help="Output root directory (default: the current working directory; "
+                             "config: output_root)")
+    parser.add_argument("--quiet", action="store_true", default=argparse.SUPPRESS,
+                        help="Suppress progress chatter; print only the summary and errors.")
+    parser.add_argument("--verbose", action="store_true", default=argparse.SUPPRESS,
+                        help="Extra detail: per-collector name/status/seconds and stage timing.")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """The engine's own standalone parser.
+
+    Retained so `iphone-surgery` keeps working as a deprecated alias and so
+    tests can inspect the engine surface directly. The documented interface is
+    the unified ``iphone-forensics`` parser in :mod:`iphone_forensics.cli`.
+    """
+    parser = argparse.ArgumentParser(
+        prog=LEGACY_PROGRAM,
+        description=("Hardware-first iPhone inspection, integrity assessment, and buyer/repair workflows. "
+                     "Safe, read-only by default; works offline against existing backups/evidence."),
+        epilog=("This name is deprecated; use `iphone-forensics` — it accepts every command shown here.\n\n"
+                "Examples:\n"
+                "  iphone-forensics doctor\n"
+                "  iphone-forensics inspect --buyer-json ~/checklist.json\n"
+                "  iphone-forensics integrity --previous old.json --current new.json\n"
+                "  iphone-forensics evidence-verify ./iphone-forensics-20260101-120000\n"
+                "\n"
+                f"Config: ./{CONFIG_FILENAME} is auto-loaded when present; --config PATH overrides it.\n"
+                "Precedence: CLI flag > --config PATH > "
+                f"./{CONFIG_FILENAME} > built-in defaults.\n"))
+    parser.add_argument("--version", action="version", version=f"{PROGRAM} {__version__}")
+    add_global_flags(parser)
+    sub = parser.add_subparsers(dest="command")
+    add_subcommands(sub)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    """Deprecated `iphone-surgery` entry point.
 
-    # Config auto-load. Precedence once loaded:
-    #   CLI flag > --config PATH > ./iphone-surgery.json > built-in defaults.
-    # The `config` subcommand manages files directly and never auto-loads, so a
-    # broken ./iphone-surgery.json stays repairable via `config --out --force`.
-    try:
-        if getattr(args, "command", None) == "config":
-            config, sources = default_config(), []
-        else:
-            config, sources = load_config(getattr(args, "config", None))
-    except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        print("Fix or remove the file, or point --config at a valid one "
-              "(validate with `iphone-surgery config --check <path>`).", file=sys.stderr)
-        return EXIT_CONFIG
-    _apply_config(args, config, sources)
-    if sources and not getattr(args, "quiet", False):
-        print("config: using " + ", ".join(str(path) for path in sources), file=sys.stderr)
+    Forwards to the unified ``iphone-forensics`` CLI so the two names can never
+    behave differently. `iphone-surgery` is no longer installed as a console
+    script; this stays for anything importing the function directly.
+    """
+    from .cli import main as unified_main
 
-    if not getattr(args, "command", None):
-        # No subcommand: welcome screen (version, toolchain, devices, next step).
-        return cmd_welcome(args)
-    return args.func(args)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] not in {"--version", "-h", "--help", "--help-advanced"}:
+        print(f"warning: `{LEGACY_PROGRAM}` is deprecated and will be removed. "
+              f"Use `{PROGRAM}` instead — it accepts every command shown here.",
+              file=sys.stderr)
+    return unified_main(argv)
 
 
 if __name__ == "__main__":

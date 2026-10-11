@@ -34,19 +34,37 @@ def test_readme_exists_and_is_substantial():
     assert len(text) > 3000, "the README was gutted"
 
 
-def test_readme_documents_exactly_the_four_primary_commands():
-    """The 4-command surface is the documented path; nothing else may lead."""
+def test_readme_documents_the_facade_commands():
+    """The 4-command facade is the documented path and must all appear.
+
+    The unified binary also exposes the engine's advanced subcommands, so the
+    surface is larger than four — but these four are what the README must lead
+    with, and a facade command that silently disappears from the README is a
+    documentation regression.
+    """
     text = _readme()
     parser = cli._build_parser()
     subparsers = next(action for action in parser._actions
                       if getattr(action, "_choices_actions", None))
     actual = {entry.dest for entry in subparsers._choices_actions}
-    assert actual == {"devices", "inspect", "doctor", "compare"}, \
-        "the primary surface changed; update the README and the docs together"
 
-    for command in actual:
+    facade = {"devices", "inspect", "doctor", "compare"}
+    assert facade <= actual, f"facade commands missing from the CLI: {sorted(facade - actual)}"
+
+    for command in facade:
         assert f"iphone-forensics {command}" in text, \
             f"README does not document `{command}`"
+
+
+def test_readme_does_not_advertise_the_retired_cli():
+    """`iphone-surgery` was merged into `iphone-forensics`; docs must not push it."""
+    text = _readme()
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("$ iphone-surgery"):
+            # A migration note may name it once; a usage example may not.
+            raise AssertionError(
+                f"README still shows a `iphone-surgery` command example: {stripped!r}")
 
 
 def test_every_command_the_readme_shows_actually_exists():

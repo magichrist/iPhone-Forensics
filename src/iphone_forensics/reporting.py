@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from .buyer import CHECKLIST, evaluate
-from .capabilities import (COVERAGE_LEVELS, claim_rules, coverage_counts, forbidden_inferences,
-                           get_matrix)
+from .capabilities import (COVERAGE_LEVELS, category_for_collector, claim_rules, coverage_counts,
+                           forbidden_inferences, get_matrix)
 from .util import redact, sha256_file, write_json
 
 # Missing telemetry must stay visibly missing. Never coerce absent data to 0/False/"" —
@@ -221,8 +221,12 @@ def _consent_rows(report: dict[str, Any]) -> str:
     requested_cell = ", ".join(f"<code>{esc(key)}</code>" for key in requested) if requested else \
         "<span class='muted'>no sensitive collector ran</span>"
 
+    # _Html cells: these three are generated markup (already escaped internally),
+    # so the table must not escape them a second time and render the tags as
+    # visible text. Everything device-derived inside them is escaped above.
     return _table(["Consent", "State", "Named on the command line", "Sensitive collectors that ran"],
-                  [["Sensitive collection", f"<b>{esc(state)}</b>", item_cell, requested_cell]],
+                  [["Sensitive collection", _Html(f"<b>{esc(state)}</b>"),
+                    _Html(item_cell), _Html(requested_cell)]],
                   "No consent record.") + f"<p class='muted'>{explanation}</p>"
 
 
@@ -296,8 +300,10 @@ def _epistemic_badge(finding: dict[str, Any]) -> str:
     from .analysis import epistemic_for
 
     label = epistemic_for(finding) if isinstance(finding, dict) else "unknown"
-    return (f"<span class='pill pill-{esc(label)}'>"
-            f"{esc(_EPISTEMIC_TEXT.get(label, label))}</span>")
+    # _Html: this is generated markup, and the label is escaped above, so the
+    # table must not escape the span a second time and show it as literal text.
+    return _Html(f"<span class='pill pill-{esc(label)}'>"
+                 f"{esc(_EPISTEMIC_TEXT.get(label, label))}</span>")
 
 
 def _claim_matrix_panel() -> str:
@@ -452,11 +458,12 @@ def _coverage_pairs(report: dict[str, Any]) -> list[tuple[str, int, int]]:
             continue
         status = _bucket_of(item.get("status"), _COLLECTION_STATUS_BUCKET)
         if status in {"passed", "warning", "failed", "inconclusive"}:
-            name = str(item.get("name") or "").lower()
-            for category in declared:
-                if category.split("_")[0] in name:
-                    collected[category] = collected.get(category, 0) + 1
-                    break
+            # Explicit mapping, not a substring guess: no collector name contains
+            # a capability category name, so the old test matched nothing and the
+            # table could only ever render zero.
+            category = category_for_collector(str(item.get("name") or ""))
+            if category in declared:
+                collected[category] = collected.get(category, 0) + 1
     return [(category, collected.get(category, 0), total)
             for category, total in sorted(declared.items())]
 
@@ -676,14 +683,22 @@ def _dashboard(report: dict[str, Any], redact_identifiers: bool = False) -> str:
     )
 
 
-def create_manifest(run_dir: Path) -> list[dict[str, Any]]:
-    manifest = []
-    for path in sorted(run_dir.rglob("*")):
-        if path.is_file() and path.name not in {"manifest.json", "report.json", "report.html"}:
-            manifest.append({"path":str(path.relative_to(run_dir)), "size_bytes":path.stat().st_size,
-                             "sha256":sha256_file(path)})
-    write_json(run_dir / "manifest.json", manifest)
-    return manifest
+def create_manifest(run_dir: Path) -> dict[str, Any]:
+    """Write `manifest.json` for *run_dir*.
+
+    This is a **thin delegation** to :func:`evidence.build_manifest`, which is the
+    single writer of the manifest format. It previously re-implemented the walk
+    here with a narrower exclusion set and emitted a bare v3 list, so the same file
+    could be written two incompatible ways depending on the call path. Kept as a
+    name because callers and tests import it from here.
+
+    Must be called **after** every artifact is written: it hashes the directory as
+    it finds it, so hashing before the reports land produces a manifest that fails
+    its own verification on the next run.
+    """
+    from .evidence import build_manifest
+
+    return build_manifest(run_dir)
 
 
 # Matches a numbered section: its opening <section ...> immediately followed by its
@@ -748,6 +763,19 @@ def _slug(text: str) -> str:
     return out or "section"
 
 
+class _Html(str):
+    """A string that is already trusted markup and must not be escaped again.
+
+    Tables escape every cell, which is correct for data but destroyed the
+    epistemic pills and the consent cells: readers saw
+    `&lt;span class='pill...&gt;` as literal text. Escaping stays the default; a
+    cell must *opt in* to being pre-rendered, so a device-supplied string can
+    never reach the document unescaped by accident.
+    """
+
+    __slots__ = ()
+
+
 def _table(headers: list[str], rows: list[list[Any]], empty: str,
            caption: str = "", *, collapsible: bool = False) -> str:
     """Render a table with real semantics.
@@ -763,7 +791,13 @@ def _table(headers: list[str], rows: list[list[Any]], empty: str,
       silently does nothing.
     """
     head = "".join(f"<th scope='col'>{esc(h)}</th>" for h in headers)
-    body = "".join("<tr>" + "".join(f"<td>{esc(cell)}</td>" for cell in row) + "</tr>" for row in rows)
+
+    def cell_html(cell: Any) -> str:
+        # Opt-in only: a _Html cell is trusted markup, anything else is escaped.
+        return str(cell) if isinstance(cell, _Html) else esc(cell)
+
+    body = "".join("<tr>" + "".join(f"<td>{cell_html(cell)}</td>" for cell in row) + "</tr>"
+                   for row in rows)
     if not body:
         body = f"<tr><td colspan='{len(headers)}'>{esc(empty)}</td></tr>"
     caption_html = f"<caption class='sr-only'>{esc(caption)}</caption>" if caption else ""
@@ -862,6 +896,76 @@ def _v4_sections(report: dict[str, Any]) -> str:
 def _redact_identifier(value: Any) -> str:
     """Mask an identifier. Delegates to the single util helper (docs/v5/07)."""
     return redact(value)
+
+
+# Keys whose *values* are identifiers wherever they appear in the report tree.
+# Redaction used to be positional — it masked `device`, `target_udid`,
+# `connected_devices` and `collection[].command` and left everything else alone,
+# so a UDID inside a finding's free-text `detail` reached report-redacted.json in
+# the clear. Redaction is now recursive over these keys plus known identifier
+# values, so no new field can silently opt out of it.
+IDENTIFIER_KEYS = frozenset({
+    "SerialNumber", "InternationalMobileEquipmentIdentity", "UniqueDeviceID", "UDID",
+    "WiFiAddress", "BluetoothAddress", "IMEI", "IMSI", "MEID", "ICCID", "PhoneNumber",
+})
+
+
+def _scrub_identifiers(value: Any, secrets: tuple[str, ...]) -> Any:
+    """Return a deep copy of *value* with every known identifier masked.
+
+    Two independent passes, because an identifier can appear either as a *value
+    under a known key* or as *free text* anywhere at all:
+
+    1. dict keys in :data:`IDENTIFIER_KEYS` are masked by key name, regardless of
+       which section they sit in.
+    2. any remaining string has every known secret value (the real UDID, serial,
+       IMEI, MAC) replaced with its masked form, which is what catches a UDID
+       embedded in a finding's `detail` sentence.
+
+    The copy is deep, so the caller's report is never mutated — the private
+    report.json and the redacted report must not share a single list.
+    """
+    if isinstance(value, dict):
+        out: dict[Any, Any] = {}
+        for key, item in value.items():
+            if isinstance(key, str) and key in IDENTIFIER_KEYS and isinstance(item, str):
+                out[key] = _redact_identifier(item)
+            else:
+                out[key] = _scrub_identifiers(item, secrets)
+        return out
+    if isinstance(value, list):
+        return [_scrub_identifiers(item, secrets) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_scrub_identifiers(item, secrets) for item in value)
+    if isinstance(value, str):
+        masked = value
+        for secret in secrets:
+            if secret and len(secret) >= 6:
+                masked = masked.replace(secret, _redact_identifier(secret))
+        return masked
+    return value
+
+
+def _report_secrets(report: dict[str, Any]) -> tuple[str, ...]:
+    """Every literal identifier value this run knows, longest first.
+
+    Ordered longest-first so a serial that is a prefix of a longer string cannot
+    mask only part of it.
+    """
+    candidates: list[str] = []
+
+    def take(value: Any) -> None:
+        if isinstance(value, str) and len(value.strip()) >= 6:
+            candidates.append(value.strip())
+
+    device = report.get("device")
+    if isinstance(device, dict):
+        for key in IDENTIFIER_KEYS:
+            take(device.get(key))
+    take(report.get("target_udid"))
+    for udid in report.get("connected_devices", []) or []:
+        take(udid)
+    return tuple(sorted(set(candidates), key=len, reverse=True))
 
 
 def _partial_collection_banner(report: dict[str, Any], assessment: dict[str, Any]) -> str:
@@ -1229,7 +1333,6 @@ def build_html(run_dir: Path, report: dict[str, Any], redact_identifiers: bool =
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>iPhone Forensics v{esc(report.get("version"))} — Buyer Inspection Report</title>
 <style>
-<style>
 :root{{
   --bg:#eef1f6;--panel:#fff;--ink:#131b26;--muted:#5b6674;--line:#d7dee6;--accent:#1f4f9c;
   --accent-soft:#e8f0fb;--high:#8f2020;--warn:#7d5100;--good:#14603a;
@@ -1413,27 +1516,21 @@ def finalize(run_dir: Path, report: dict[str, Any], redact_identifiers: bool = F
     # not be able to reach report.json or the HTML. The audit runs last because it
     # checks the data the earlier stages produced.
     report["claim_audit"] = _audit_claim_matrix(report)
-    create_manifest(run_dir)
+
+    # Write every artifact *first*, then hash. The manifest used to be written
+    # before report.json and the redacted pair, so it hashed the previous run's
+    # copies and failed its own verification on the very next check.
     write_json(run_dir / "report.json", report)
     build_html(run_dir, report, redact_identifiers=redact_identifiers)
     if redact_identifiers:
-        redacted = dict(report)
-        redacted_device = dict(report.get("device", {})) if isinstance(report.get("device"), dict) else {}
-        for key in ("SerialNumber", "InternationalMobileEquipmentIdentity", "UniqueDeviceID", "UDID", "WiFiAddress", "BluetoothAddress"):
-            if key in redacted_device:
-                redacted_device[key] = _redact_identifier(redacted_device[key])
-        redacted["device"] = redacted_device
-        original_udid = str(report.get("target_udid", "") or "")
-        redacted["target_udid"] = _redact_identifier(original_udid)
-        redacted["connected_devices"] = [_redact_identifier(value) for value in report.get("connected_devices", [])]
-        redacted["tools_pymobiledevice3"] = report.get("tools_pymobiledevice3")
-        for collection_item in redacted.get("collection", []):
-            command = collection_item.get("command", []) if isinstance(collection_item, dict) else []
-            if original_udid:
-                collection_item["command"] = [str(part).replace(original_udid, _redact_identifier(original_udid)) for part in command]
+        # Deep copy, then scrub recursively. A shallow `dict(report)` shared the
+        # `collection` list with the private report, so masking a command here
+        # silently corrupted report.json as well.
+        redacted = _scrub_identifiers(report, _report_secrets(report))
         write_json(run_dir / "report-redacted.json", redacted)
         # report-redacted.html is generated from the redacted copy; never include raw evidence links.
         build_html(run_dir, redacted, redact_identifiers=True)
         generated = (run_dir / "report.html").read_text(encoding="utf-8")
         (run_dir / "report-redacted.html").write_text(generated, encoding="utf-8")
         build_html(run_dir, report, redact_identifiers=False)
+    create_manifest(run_dir)

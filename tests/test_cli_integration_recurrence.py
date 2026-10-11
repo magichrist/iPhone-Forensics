@@ -212,10 +212,43 @@ def test_partial_collection_report_states_incompleteness(tmp_path: Path):
     assert assessment["status"] == "incomplete"
 
 
-def test_entry_points_declared():
+def test_single_entry_point_declared():
+    """One binary, one name.
+
+    The project shipped `iphone-forensics` and `iphone-surgery` as two console
+    scripts for one tool, and the two surfaces had already drifted apart. The
+    engine's commands are now reachable from `iphone-forensics`, so the second
+    entry point is gone.
+    """
     text = Path("pyproject.toml").read_text()
-    assert 'iphone-surgery = "iphone_forensics.cli_v4:main"' in text
-    assert 'iphone-forensics = "iphone_forensics.cli:main"' in text
+    scripts_block = text.split("[project.scripts]", 1)[1].split("[", 1)[0]
+    entry_points = [
+        line.split("=", 1)[0].strip()
+        for line in scripts_block.splitlines()
+        if "=" in line and not line.strip().startswith("#")
+    ]
+    assert entry_points == ["iphone-forensics"], \
+        f"expected exactly one console script, found {entry_points}"
+    assert "iphone_surgery = " not in scripts_block, "the retired entry point must not return"
+
+
+def test_unified_cli_accepts_every_engine_subcommand():
+    """Every command the engine offers must exist on the unified binary."""
+    from iphone_forensics.cli import _build_parser
+    from iphone_forensics.cli_v4 import build_parser as build_engine_parser
+
+    def subcommands(parser):
+        for action in parser._actions:
+            choices = getattr(action, "choices", None)
+            if isinstance(choices, dict) and choices:
+                return set(choices)
+        return set()
+
+    engine_commands = subcommands(build_engine_parser())
+    unified_commands = subcommands(_build_parser())
+    missing = engine_commands - unified_commands
+    assert not missing, f"engine commands absent from the unified CLI: {sorted(missing)}"
+    assert {"devices", "inspect", "doctor", "compare"} <= unified_commands
 
 
 def test_hardware_integration_markers_skip_no_device():

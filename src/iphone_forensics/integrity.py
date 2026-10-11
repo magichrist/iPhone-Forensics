@@ -37,6 +37,7 @@ Phase-3 hardening implemented here:
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .models import INTEGRITY_CLASSES, Finding
@@ -54,6 +55,36 @@ IDENTITY_FIELDS = [
 # they are shared by every phone of the same model and build.
 CONTINUITY_FIELDS = ("UniqueDeviceID", "SerialNumber", "InternationalMobileEquipmentIdentity")
 
+# A change to any of these is the tool's strongest tamper signal, so each must
+# reach BLOCKER. The previous check was a substring test for "serial"/"imei"/
+# "udid", which never matched the field names iOS actually reports: "imei" is
+# not a substring of "InternationalMobileEquipmentIdentity", nor "udid" of
+# "UniqueDeviceID". An IMEI swap silently degraded from BLOCKER to REVIEW while
+# the module docstring still promised the BLOCKER rule. Match on names, and fall
+# back to a substring sweep only for keys no collector produces today.
+HARDWARE_IDENTIFIER_FIELDS = frozenset(CONTINUITY_FIELDS) | {
+    "IMEI", "IMSI", "MEID", "ICCID", "UDID", "WiFiAddress", "BluetoothAddress",
+    "PhoneNumber",
+}
+
+
+def _is_hardware_identifier(field: str) -> bool:
+    """True when *field* names a hard hardware identifier.
+
+    Case- and separator-insensitive, so `udid`, `UDID`, `DeviceUDID` and
+    `UniqueDeviceID` are all recognised.
+    """
+    normalized = re.sub(r"[^a-z0-9]", "", str(field).lower())
+    if normalized in {_re_key(known) for known in HARDWARE_IDENTIFIER_FIELDS}:
+        return True
+    # Substring sweep for forward compatibility with keys not yet seen.
+    return any(token in normalized for token in ("serial", "imei", "udid", "meid", "iccid"))
+
+
+def _re_key(name: str) -> str:
+    """Normalize a field name the same way :func:`_is_hardware_identifier` does."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
 # Compared in integer bytes; a value too small to be bytes is read as a GB tier.
 CAPACITY_FIELDS = ("TotalDiskCapacity", "TotalDataCapacity")
 
@@ -61,6 +92,12 @@ BYTES_PER_GB = 1_000_000_000
 # Largest plausible storage tier in GB (4 TB). Anything at or below this that
 # appears in a capacity field is a tier, not a byte count.
 MAX_GB_TIER = 4096
+
+# Smallest capacity an iPhone has shipped with (8 GB). A bare number below this
+# is not a plausible GB tier, so it is read as a raw byte count instead of being
+# multiplied. Without this floor the tier heuristic was discontinuous at its own
+# boundary: 4096 scaled to 4.096e12 bytes but 4097 did not.
+MIN_GB_TIER = 8
 
 # Fields where a change is *most plausibly* benign (iOS reporting, pairing state).
 BENIGN_PATTERNS = ("ProductVersion", "BuildVersion", "ActivationState", "CarrierBundleVersion")
@@ -118,17 +155,34 @@ def _canonical_capacity(value: Any) -> Any:
     text = str(value).strip().replace(",", "")
     if not text:
         return value
+    # An explicit unit suffix is authoritative: "128 GB" is a tier even though the
+    # bare number is small. Record that the string carried a unit so the bare
+    # number below is not second-guessed.
+    had_unit_suffix = False
     for suffix in ("gib", "gb"):
         if text.lower().endswith(suffix):
             text = text[:-len(suffix)].strip()
+            had_unit_suffix = True
             break
     try:
         number = float(text)
     except ValueError:
         return value
-    if 0 < number <= MAX_GB_TIER:
-        number *= BYTES_PER_GB
-    return round(number)          # round(float) with no ndigits → int bytes
+    if had_unit_suffix:
+        # "128 GB" is unambiguous: always bytes, regardless of magnitude.
+        return round(number * BYTES_PER_GB)
+    if number >= MIN_GB_TIER * BYTES_PER_GB:
+        # Already a plausible byte count (>= the smallest shipping capacity), so
+        # leave it alone. This single threshold replaces a "<= 4096 GB tier" rule
+        # that was discontinuous at its own boundary — 4096 became 4.096e12 bytes
+        # while 4097 stayed 4097 — and it also stops a bare `1` being read as 1e9.
+        return round(number)
+    if MIN_GB_TIER <= number <= MAX_GB_TIER:
+        # Inside the tier range and below any plausible byte count, so it is a GB
+        # tier. Values under MIN_GB_TIER (a bare `1`) are not a capacity any iPhone
+        # has shipped with and are left untouched rather than inflated.
+        return round(number * BYTES_PER_GB)
+    return round(number)
 
 
 def normalize_device(report: dict[str, Any] | None) -> dict[str, Any]:
@@ -209,7 +263,7 @@ def classify_change(field_name: str, previous: Any, current: Any,
         classification = "change_detected"
         severity = "INFO"
         explanation = "A diagnostic candidate metric changed. Interpret only with source-tool provenance and units in hand."
-    elif "serial" in field_lower or "imei" in field_lower or "udid" in field_lower:
+    elif _is_hardware_identifier(field_name):
         classification = "suspicious"
         severity = "BLOCKER"
         confidence = "medium"
@@ -430,13 +484,20 @@ def assess_integrity(previous: dict[str, Any] | None, current: dict[str, Any],
             except (TypeError, ValueError):
                 pass
 
+    # A field only counts as evidence for `consistent` if it was actually
+    # *comparable* on both sides. The old test was "did we record any
+    # classification at all", and an all-inconclusive dict is truthy — so two
+    # reports sharing no comparable field were scored `consistent`, the
+    # strongest available verdict, from no evidence whatsoever.
+    comparable = [c for c in classifications.values() if c != "inconclusive"]
+
     if not previous:
         overall = "not_tested"
     elif any(c == "suspicious" for c in classifications.values()):
         overall = "suspicious"
     elif any(c == "change_detected" for c in classifications.values()):
         overall = "change_detected"
-    elif classifications:
+    elif comparable:
         overall = "consistent"
     else:
         overall = "inconclusive"

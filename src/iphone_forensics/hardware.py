@@ -7,6 +7,7 @@ never an invented measurement.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .models import SubsystemCheck
@@ -62,8 +63,22 @@ def normalize_bytes_to_gb(value: Any) -> float | None:
 
 
 def find_candidate(candidates: list[dict[str, Any]], pattern: str) -> list[dict[str, Any]]:
-    pat = pattern.lower()
-    return [c for c in candidates if pat in str(c.get("key", "")).lower()]
+    """Candidates whose key matches *pattern*.
+
+    *pattern* is a regular expression, not a literal: callers pass forms like
+    ``"cycle.?count"`` and ``"disk.?capacity"``. This used to do a plain substring
+    test, so every regex metacharacter made the match impossible — all of them
+    silently returned ``[]``, and the battery checks then fell through to their
+    fallback and reported the **design** capacity as if it were the maximum.
+    Matching is case-insensitive; an invalid pattern degrades to a literal
+    substring test rather than raising into a run.
+    """
+    try:
+        compiled = re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        literal = pattern.lower()
+        return [c for c in candidates if literal in str(c.get("key", "")).lower()]
+    return [c for c in candidates if compiled.search(str(c.get("key", "")))]
 
 
 # ------------------------------------------------------------------- battery
@@ -74,8 +89,8 @@ def battery_checks(report: dict[str, Any]) -> list[SubsystemCheck]:
     # 1. Cycle count from GasGauge diagnostics if the device exposed it.
     # A missing metric is an evidence gap and is worded as one: it must never be
     # read as evidence of a replaced battery (docs/v5/06 claim matrix).
-    cycle = find_candidate(report.get("diagnostic_candidates", []), "yclecount") or \
-            find_candidate(report.get("diagnostic_candidates", []), "ycle count")
+    cycle = find_candidate(report.get("diagnostic_candidates", []), r"cycle.?count") or \
+            find_candidate(report.get("diagnostic_candidates", []), r"cyccount")
     value = _num(cycle[0].get("value")) if cycle else None
     high = value is not None and value >= 500
     check = SubsystemCheck(
@@ -122,10 +137,16 @@ def battery_checks(report: dict[str, Any]) -> list[SubsystemCheck]:
         check.alternatives = ["Long ownership is legitimate; high cycle count alone is not a fault."]
     checks.append(check)
 
-    # 2. Max capacity if exposed.
-    cap = find_candidate(report.get("diagnostic_candidates", []), "maximumfacapacity") or \
-          find_candidate(report.get("diagnostic_candidates", []), "fullchargecapacity") or \
-          find_candidate(report.get("diagnostic_candidates", []), "designcapacity")
+    # 2. Max capacity if exposed. Each pattern is anchored to the metric it names,
+    # and the design-capacity fallback is recorded as such rather than being
+    # reported under the max-capacity label.
+    cap = (find_candidate(report.get("diagnostic_candidates", []), r"max(imum)?full.?charge.?capacity") or
+           find_candidate(report.get("diagnostic_candidates", []), r"max(imum)?capacity") or
+           find_candidate(report.get("diagnostic_candidates", []), r"full.?charge.?capacity"))
+    cap_is_design = False
+    if not cap:
+        cap = find_candidate(report.get("diagnostic_candidates", []), r"design.?capacity")
+        cap_is_design = bool(cap)
     capacity = _num(cap[0].get("value")) if cap else None
     cap_check = SubsystemCheck(
         subsystem="battery",
@@ -135,17 +156,23 @@ def battery_checks(report: dict[str, Any]) -> list[SubsystemCheck]:
         measurement=capacity,
         measurement_unit="%" if capacity is not None and capacity <= 150 else "mAh (raw)" if capacity is not None else "",
         expected="Interpret only against this device's model-specific documentation; units vary by field and firmware.",
-        observed=f"MaxCapacity={capacity}" if capacity is not None else "",
+        observed=(f"DesignCapacity={capacity}" if cap_is_design else f"MaxCapacity={capacity}") if capacity is not None else "",
         status="inconclusive" if capacity is not None else "not_tested",
         confidence="low" if capacity is not None else "none",
-        explanation=("Raw capacity fields need unit verification against the tool version; do not treat an "
+        explanation=("Only the design capacity was exposed, so this is the rated capacity of a new "
+                     "battery, not what this battery can currently hold. It is evidence of neither "
+                     "health nor wear." if cap_is_design else
+                     "Raw capacity fields need unit verification against the tool version; do not treat an "
                      "unlabeled number as a percentage of design capacity."),
         # --- evidence trail (docs/v5/05)
         check_id="battery.max_capacity",
         collector="diagnostics-gauge" if cap else "",
         collected_at=utc_now() if capacity is not None else "",
         normalized_value=float(capacity) if capacity is not None else None,
-        interpretation=("Maximum capacity is the charge the battery can currently hold, expressed against "
+        interpretation=("Design capacity is the rated charge of a new battery of this model. This figure "
+                        "does not describe this battery's present charge-holding ability."
+                        if cap_is_design and capacity is not None else
+                        "Maximum capacity is the charge the battery can currently hold, expressed against "
                         "its design capacity. A figure below design capacity is wear, not a fault."
                         if capacity is not None else "No capacity figure was available, so retention is unknown."),
         thresholds=("Documented basis: design capacity is model-specific and published by Apple per model. "

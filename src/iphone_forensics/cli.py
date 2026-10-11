@@ -59,6 +59,8 @@ from .cli_v4 import (
     EXIT_CONFIG,
     EXIT_OK,
     _tool_path,
+    add_global_flags,
+    add_subcommands,
     cmd_checklist,
     cmd_compare,
     cmd_devices,
@@ -193,8 +195,54 @@ def _probe_devices() -> list[str] | None:
         return None
 
 
+def _ask_device_and_consent(devices: list[str],
+                            consent: bool | None) -> tuple[str | None, bool | None]:
+    """Ask which device, then consent — in a **single** terminal interaction.
+
+    These were two sequential `input()` calls, so a TTY session with more than
+    one device attached was interrupted twice before any collection started.
+    Both questions now appear before one prompt, and either can be answered by
+    pressing Enter alone: the device defaults to the first, consent to no.
+
+    Returns ``(udid, consent)``; ``(None, ...)`` means the operator cancelled.
+    """
+    print(f"\n{len(devices)} devices detected.")
+    for index, udid in enumerate(devices, 1):
+        print(f"  {index}. {redact(udid)}")
+    print("  (the full UDID is written to the run's report.json)")
+    print("\nStandard profile is read-only. Consent would additionally collect:")
+    for item, flags in SENSITIVE_SCOPE:
+        print(f"  - {item:<32} ({flags})")
+    try:
+        answer = input(f"Choose 1-{len(devices)} and whether to include sensitive "
+                       f"collection — e.g. `2 y`, or Enter for `1 n`: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None, None
+    if not answer:
+        return devices[0], False
+
+    parts = answer.split()
+    chosen_index = 1
+    granted = consent is True
+    for token in parts:
+        if token.isdigit() and 1 <= int(token) <= len(devices):
+            chosen_index = int(token)
+        elif token in {"y", "yes"}:
+            granted = True
+        elif token in {"n", "no"}:
+            granted = False
+        else:
+            print(f"Ignoring unrecognised input {token!r}.")
+    return devices[chosen_index - 1], granted
+
+
 def _select_device(devices: list[str]) -> str | None:
-    """Numbered selector for a terminal session. None = cancelled or invalid."""
+    """Numbered selector for a terminal session. None = cancelled or invalid.
+
+    Retained for callers that need to ask about the device alone; `inspect` uses
+    :func:`_ask_device_and_consent` so a session is only interrupted once.
+    """
     print(f"\n{len(devices)} devices detected. Which one should be inspected?")
     for index, udid in enumerate(devices, 1):
         print(f"  {index}. {redact(udid)}")
@@ -300,14 +348,28 @@ def _engine_args(namespace: argparse.Namespace, *, output: str, device: str | No
     def boolean(dest: str) -> bool:
         return bool(_given(namespace, dest)) or sensitive
 
+    # Two offline paths reach the engine's `backup_dir`: the engine's own
+    # `--backup-dir`, and the facade's legacy `--mvt-backup`. Only the latter was
+    # ever read here, so `inspect --backup-dir` parsed cleanly and then ran a
+    # *device* collection against no device — the run produced an empty report
+    # instead of triaging the supplied directory.
+    backup_dir = _given(namespace, "backup_dir")
     mvt_backup = _given(namespace, "mvt_backup")
+    if backup_dir and mvt_backup:
+        print("error: --backup-dir and --mvt-backup both select the offline path; "
+              "pass only one.", file=sys.stderr)
+        backup_dir = mvt_backup = None
+    offline_dir = backup_dir or mvt_backup
     if mvt_backup:
         print(f"--mvt-backup {mvt_backup}: running the offline backup path (artifact triage + mvt-ios "
               "check-backup). No device collection runs for this path.")
+    elif backup_dir:
+        print(f"--backup-dir {backup_dir}: running the offline evidence path. "
+              "No device collection runs for this path.")
     return argparse.Namespace(
         output=output,
         device=device,
-        backup_dir=mvt_backup or None,
+        backup_dir=offline_dir or None,
         buyer_json=_flag_value(namespace, "buyer_json"),
         compare_json=_flag_value(namespace, "compare_json"),
         redact=bool(_flag_value(namespace, "redact_identifiers", False)),
@@ -355,6 +417,14 @@ def _run_inspect(namespace: argparse.Namespace, output: str) -> int:
         return invalid
 
     device = _flag_value(namespace, "device")
+    # Offline paths (`--backup-dir` / `--mvt-backup`) analyse supplied artifacts
+    # and never touch a device, so neither device discovery nor the consent
+    # prompt belongs in that flow.
+    offline = bool(_given(namespace, "backup_dir") or _given(namespace, "mvt_backup"))
+    if offline:
+        sensitive, explicit = False, frozenset()
+        return cmd_inspect(_engine_args(namespace, output=output, device=None,
+                                        sensitive=False, explicit=explicit))
     if not device:
         devices = _probe_devices()
         if devices is None:
@@ -377,16 +447,39 @@ def _run_inspect(namespace: argparse.Namespace, output: str) -> int:
                   "`iphone-forensics inspect --device <udid>`.")
             # The engine sees the same ambiguity and returns EXIT_AMBIGUOUS_DEVICE.
         else:
-            chosen = _select_device(devices)
+            # One prompt covering both questions, so a TTY session with several
+            # devices attached is interrupted once rather than twice.
+            explicit = frozenset(dest for dest in SENSITIVE_DESTS
+                                 if _explicitly_requested(namespace, dest))
+            # `consent=None` means "ask, as part of the single prompt" — it must
+            # not itself print the scope, or the list appears twice.
+            chosen, granted = _ask_device_and_consent(devices, None)
             if chosen is None:
                 print("No device selected; nothing was inspected.")
                 return EXIT_AMBIGUOUS_DEVICE
             device = chosen
+            return _dispatch_inspect(namespace, output, device, granted, explicit)
 
     sensitive, explicit = _resolve_sensitive(namespace)
-    engine_args = _engine_args(namespace, output=output, device=device,
-                               sensitive=sensitive, explicit=explicit)
-    return cmd_inspect(engine_args)
+    return _dispatch_inspect(namespace, output, device, sensitive, explicit)
+
+
+def _dispatch_inspect(namespace: argparse.Namespace, output: str, device: str | None,
+                      sensitive: bool, explicit: frozenset[str]) -> int:
+    """Hand the resolved device and consent decision to the engine."""
+    if sensitive:
+        print("Sensitive collection enabled for this run by consent.")
+    elif granted_explicitly := explicit:
+        print("Sensitive collectors explicitly requested: "
+              + ", ".join(sorted(f"--{dest.replace('_', '-')}" for dest in granted_explicitly))
+              + " — every other sensitive collector stays off.")
+    elif not _is_tty():
+        print("Non-interactive session: sensitive collection skipped "
+              "(status: skipped_by_user). Re-run with --yes-sensitive to include it.")
+    else:
+        print("Sensitive collection declined; standard read-only profile only.")
+    return cmd_inspect(_engine_args(namespace, output=output, device=device,
+                                    sensitive=sensitive, explicit=explicit))
 
 
 def _default_current_report() -> Path | None:
@@ -398,9 +491,13 @@ def _default_current_report() -> Path | None:
 
 
 def _run_compare(namespace: argparse.Namespace) -> int:
+    # The previous report arrives either positionally or as --previous. Both are
+    # accepted: the positional form is the facade's, the flag is what the engine
+    # required before the two CLIs were merged, and existing scripts use it.
     previous = str(_flag_value(namespace, "previous", "") or "")
     if not previous:
-        print("error: compare needs a previous report.json", file=sys.stderr)
+        print("error: compare needs a previous report.json, given either "
+              "positionally or with --previous", file=sys.stderr)
         return EXIT_CONFIG
     current = _flag_value(namespace, "current")
     if not current:
@@ -447,15 +544,34 @@ def _welcome() -> int:
 
 # ------------------------------------------------------------------- parser
 
+def _existing_flags(parser: argparse.ArgumentParser) -> set[str]:
+    """Option strings and dests already declared on *parser*."""
+    seen: set[str] = set()
+    for action in parser._actions:
+        seen.update(action.option_strings)
+        if action.dest and action.dest != "help":
+            seen.add(action.dest)
+    return seen
+
+
 def _add_compat_flags(parser: argparse.ArgumentParser, *, all_flags: bool) -> None:
     """Attach the hidden compatibility group.
 
     `help=argparse.SUPPRESS` keeps them out of `--help`; `default=SUPPRESS` keeps
-    a subparser from clobbering a value given before the command name and lets
+    a subparser from clobbering a value given before the subcommand name and lets
     the dispatcher tell "not passed" from "passed as falsy".
+
+    A flag the parser already declares is skipped rather than re-added. Now that
+    the facade augments the engine's own `inspect`/`devices`/`doctor` parsers,
+    several legacy names (`--output`, `--device`, `--buyer-json`, …) are already
+    present with equivalent meaning, and argparse rejects a duplicate option.
     """
+    present = _existing_flags(parser)
     for flag, _sensitive, spec in _COMPAT_FLAGS:
         if not all_flags and flag == "--output":
+            continue
+        dest = _dest_of(flag, spec)
+        if flag in present or dest in present:
             continue
         kwargs = {key: value for key, value in spec.items() if key != "help"}
         parser.add_argument(flag, default=argparse.SUPPRESS, help=argparse.SUPPRESS, **kwargs)
@@ -472,7 +588,13 @@ def _add_consent_flags(container: Any, *, hidden: bool) -> None:
         kwargs = {key: value for key, value in spec.items() if key != "help"}
         if hidden:
             kwargs["help"] = argparse.SUPPRESS
-            kwargs["default"] = argparse.SUPPRESS
+        # SUPPRESS always, not only when hidden. The subparser's store_true
+        # default (False) otherwise overwrote a `--yes-sensitive` given *before*
+        # the subcommand, so `--yes-sensitive inspect` silently ran with
+        # sensitive collection off while `inspect --yes-sensitive` honoured it.
+        # Matching the compat flags' `default=SUPPRESS` also keeps "not passed"
+        # distinguishable from "passed as False" for `_resolve_sensitive`.
+        kwargs["default"] = argparse.SUPPRESS
         group.add_argument(flag, **kwargs)
 
 
@@ -501,39 +623,57 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command", metavar="command")
 
-    devices = sub.add_parser("devices", help="List connected devices and the next step")
-    _add_compat_flags(devices, all_flags=False)
-    devices.set_defaults(func=_run_devices)
+    # The engine defines every subcommand except `compare`. Defining `inspect`
+    # twice — once here with a hand-copied flag list and once in the engine — is
+    # what let the facade drift: `inspect --backup-dir` and
+    # `--no-fail-on-findings` worked under `iphone-surgery` and silently vanished
+    # from `iphone-forensics`. So the facade *augments* the engine's parser
+    # (attaching consent and legacy flags and swapping in its own dispatch)
+    # instead of re-declaring one.
+    add_subcommands(sub, skip=frozenset({"compare"}))
 
-    doctor = sub.add_parser("doctor", help="Check toolchain, pairing, and device reachability")
-    _add_compat_flags(doctor, all_flags=False)
-    doctor.set_defaults(func=_run_doctor)
+    _augment_facade_commands(sub)
 
-    inspect = sub.add_parser(
-        "inspect",
-        help="Full read-only inspection of one device (no flags needed)",
-        description=("Run the standard profile: every non-destructive collector is on and "
-                     "sensitive collection is off unless you consent.\n\n"
-                     "No flag is needed for a normal inspection. Device selection, output "
-                     "location, buyer checklists, redaction, and every legacy collector flag "
-                     f"are documented by `{PROGRAM} --help-advanced`."),
-        formatter_class=argparse.RawDescriptionHelpFormatter)
-    _add_consent_flags(inspect, hidden=False)
-    _add_compat_flags(inspect, all_flags=True)
-    inspect.set_defaults(func=_run_inspect_command)
-
+    # `compare` is the one command the facade redefines outright: it takes the
+    # previous report positionally and defaults `--current` to the newest run in
+    # the working directory, which the engine's `--previous/--current` pair does
+    # not.
     compare = sub.add_parser(
         "compare",
         help="Gap-aware comparison of two report.json snapshots",
         description=("Classify every field as changed, unchanged, only-in-one-side, or not "
                      "comparable, and report the integrity/continuity verdict. A missing field "
-                     "on one side is never treated as a device change."))
-    compare.add_argument("previous", metavar="PREVIOUS_REPORT", help="Earlier run's report.json")
+                     "on one side is never treated as a device change.\n\n"
+                     "The previous report may be given positionally or with --previous; both "
+                     "forms are accepted because the engine previously required the flag."))
+    compare.add_argument("previous_report", metavar="PREVIOUS_REPORT", nargs="?",
+                         help="Earlier run's report.json")
+    compare.add_argument("--previous", metavar="REPORT", dest="previous",
+                         help="Earlier run's report.json (alternative to the positional form)")
     compare.add_argument("--current", metavar="REPORT",
                          help="Later run's report.json (default: newest ./iphone-forensics-*/report.json)")
     compare.add_argument("--out", metavar="PATH", help="Write the combined comparison JSON here")
     compare.set_defaults(func=_run_compare)
+
     return parser
+
+
+def _augment_facade_commands(sub: Any) -> None:
+    """Layer the facade's behaviour onto the engine's subcommand parsers.
+
+    For `devices`, `doctor` and `inspect` this attaches the facade's own flags and
+    replaces `func` with the facade's dispatch, so a run behaves the documented
+    way (consent prompt, device selection, legacy-flag mapping) while keeping
+    every flag the engine already declared.
+    """
+    for name, facade_func, all_flags, description in _FACADE_AUGMENTED:
+        command = sub.choices[name]
+        if description:
+            command.description = description
+        if name == "inspect":
+            _add_consent_flags(command, hidden=False)
+        _add_compat_flags(command, all_flags=all_flags)
+        command.set_defaults(func=facade_func)
 
 
 def _run_devices(namespace: argparse.Namespace) -> int:
@@ -550,6 +690,23 @@ def _run_inspect_command(namespace: argparse.Namespace, output: str | None = Non
         return _write_checklist_template(str(_flag_value(namespace, "init_buyer_checklist")))
     root = output or _flag_value(namespace, "output", DEFAULT_OUTPUT_ROOT)
     return _run_inspect(namespace, str(root))
+
+
+# Commands the facade customises on top of the engine's parser:
+#   (name, dispatch, attach_all_compat_flags, description override)
+# `compare` is absent: the facade redefines that parser outright, because its
+# positional-argument form is incompatible with the engine's flag pair.
+# Declared after the dispatch functions, which it references.
+_FACADE_AUGMENTED: tuple[tuple[str, Any, bool, str], ...] = (
+    ("devices", _run_devices, False, ""),
+    ("doctor", _run_doctor, False, ""),
+    ("inspect", _run_inspect_command, True,
+     "Run the standard profile: every non-destructive collector is on and "
+     "sensitive collection is off unless you consent.\n\n"
+     "No flag is needed for a normal inspection. Device selection, output "
+     "location, buyer checklists, redaction, and every legacy collector flag "
+     f"are documented by `{PROGRAM} --help-advanced`."),
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -627,11 +784,42 @@ def main(argv: list[str] | None = None) -> int:
     command = _flag_value(args, "command")
     if command in COMMANDS:
         return args.func(args)
-    if command is None and not any(_given(args, dest) is not None for dest in COMPAT_DESTS):
+    if command is not None:
+        # An advanced command mounted from the engine (integrity, case, buyer,
+        # evidence-verify, …). It carries its own `func`, and the engine's config
+        # layer has to run first so `--config` and ./iphone-surgery.json apply.
+        return _run_advanced(args)
+    if not any(_given(args, dest) is not None for dest in COMPAT_DESTS):
         return _welcome()
     # No command, but legacy flags were passed: perform the same inspection the
     # pre-v5 CLI always performed (this is also the `iphone_audit.py` path).
     return _run_inspect_command(args)
+
+
+def _run_advanced(args: argparse.Namespace) -> int:
+    """Dispatch an engine subcommand through the engine's config layer.
+
+    These commands used to be reached only via `iphone-surgery`, whose `main`
+    loaded `./iphone-surgery.json` and applied it before dispatch. Now that they
+    share one binary they must still get that treatment, or `--config` would be
+    silently ignored for exactly the commands that document it.
+    """
+    from .cli_v4 import EXIT_CONFIG, ConfigError, _apply_config, default_config, load_config
+
+    try:
+        if _flag_value(args, "command") == "config":
+            config, sources = default_config(), []
+        else:
+            config, sources = load_config(getattr(args, "config", None))
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        print(f"Fix or remove the file, or point --config at a valid one "
+              f"(validate with `{PROGRAM} config --check <path>`).", file=sys.stderr)
+        return EXIT_CONFIG
+    _apply_config(args, config, sources)
+    if sources and not getattr(args, "quiet", False):
+        print("config: using " + ", ".join(str(path) for path in sources), file=sys.stderr)
+    return args.func(args)
 
 
 def _run_mvt_backup(backup_path: str, run_dir: Path, raw: Path, report: dict[str, Any]) -> None:
