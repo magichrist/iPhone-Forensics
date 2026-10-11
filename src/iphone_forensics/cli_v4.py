@@ -1227,6 +1227,25 @@ def _exit_for(report: dict[str, Any], args: argparse.Namespace, *, completed: bo
     return EXIT_FINDINGS if warnings else EXIT_OK
 
 
+def _manual_subsystems(hardware: dict[str, Any]) -> set[str]:
+    """Subsystem names whose every check is a guided manual test.
+
+    Derived from the checks themselves rather than a hardcoded list, so adding a
+    manual test automatically moves its subsystem out of the automated block.
+    """
+    manual: set[str] = set()
+    seen: dict[str, list[str]] = {}
+    for check in hardware.get("checks", []) or []:
+        if isinstance(check, dict):
+            seen.setdefault(str(check.get("subsystem", "")), []).append(
+                str(check.get("question", "")))
+    for name, questions in seen.items():
+        if name and questions and all(
+                q.lower().startswith("manual guided test") for q in questions):
+            manual.add(name)
+    return manual
+
+
 def _findings_breakdown(findings: list[dict[str, Any]]) -> str:
     """`3 (1 BLOCKER, 1 REVIEW, 1 INFO)` — counts by severity, commonest first."""
     counts: dict[str, int] = {}
@@ -1260,12 +1279,27 @@ def _print_summary(run_dir: Path, report: dict[str, Any], console: _Console | No
           if findings else "Findings:     0")
     subs = hardware.get("subsystems", {})
     if subs:
-        print("\nHardware subsystem statuses:")
-        for name, status in subs.items():
-            print(f"  {name:<20} {status}")
+        # A subsystem listed as not_tested is ambiguous: it can mean "this tool
+        # cannot measure it, ever" or "we failed to measure it this time".
+        # Printing them in one undifferentiated block made a run where the
+        # automated collectors all succeeded look like it had retrieved almost
+        # nothing, because the manual-test placeholders dominate the list.
+        # They are split so the automated result is legible at a glance.
+        manual = _manual_subsystems(hardware)
+        automated = {name: status for name, status in subs.items()
+                     if name not in manual}
+        if automated:
+            print("\nHardware subsystem statuses:")
+            for name, status in automated.items():
+                print(f"  {name:<22} {status}")
+        if manual:
+            print(f"\nNot software-verifiable — manual checks a buyer must do by hand "
+                  f"({len(manual)}):")
+            print("  " + ", ".join(sorted(manual)))
+            print("  Run `iphone-forensics manual-tests` for the guided script.")
     warnings = len(hardware.get("warnings", []))
     if warnings:
-        print(f"Review-worthy hardware warnings: {warnings}")
+        print(f"\nReview-worthy hardware warnings: {warnings}")
     print("\nUnknown ≠ pass. Do not treat missing evidence as a healthy result.")
 
 

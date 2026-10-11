@@ -1,3 +1,5 @@
+import argparse
+
 from iphone_forensics.collectors import parse_key_values, parse_plist
 
 
@@ -96,3 +98,68 @@ def test_unprobeable_pmd_tool_does_not_raise(monkeypatch):
 
     monkeypatch.setattr(collectors, "run_command", exploding)
     assert collectors._pmd_supports_udid_flag("pmd") is False
+
+
+# ------------------------------------------------- storage capacity collection
+
+def test_disk_usage_domain_is_queried_for_storage_capacity(monkeypatch, tmp_path):
+    """TotalDiskCapacity lives in com.apple.disk_usage, not the default domain.
+
+    `ideviceinfo -x` dumps only the default domain, which on current iOS has no
+    capacity keys — so storage silently read as "not collected" on every modern
+    device while being one flag away.
+    """
+    from iphone_forensics import collectors
+
+    def fake_run(command, timeout=None):
+        if "-q" in command and "com.apple.disk_usage" in command:
+            return {"stdout": b"TotalDiskCapacity: 128000000000\n"
+                             b"TotalDataCapacity: 115484557312\n",
+                    "stderr": b"", "returncode": 0,
+                    "duration_seconds": 0.1, "timed_out": False}
+        if "-x" in command:
+            return {"stdout": b"<plist><dict><key>ProductType</key>"
+                             b"<string>iPhone14,5</string></dict></plist>",
+                    "stderr": b"", "returncode": 0,
+                    "duration_seconds": 0.1, "timed_out": False}
+        return {"stdout": b"", "stderr": b"", "returncode": 1,
+                "duration_seconds": 0.1, "timed_out": False}
+
+    monkeypatch.setattr(collectors, "run_command", fake_run)
+    monkeypatch.setattr(collectors.shutil, "which",
+                        lambda name: f"/usr/bin/{name}" if name else None)
+
+    report = {"collection": [], "findings": []}
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    args = argparse.Namespace(crash_reports=False, app_list=False, provisioning=False,
+                              syslog_seconds=0, pmd_syslog_seconds=0, backup="none",
+                              pmd_app_list=False, pmd_processes=False,
+                              pmd_crash_reports=False)
+    collectors.collect_device(args, tmp_path, evidence, report, "UDID")
+
+    assert any(c["name"] == "device-info-disk-usage" for c in report["collection"]), \
+        "the disk_usage domain was never queried"
+    assert report["device"].get("TotalDiskCapacity") == "128000000000"
+    assert report["device"].get("TotalDataCapacity") == "115484557312"
+    assert report["device"].get("ProductType") == "iPhone14,5", "existing keys must survive"
+
+
+def test_unavailable_diagnostics_relay_is_unsupported_not_an_error(monkeypatch, tmp_path):
+    """`diagnostics All` is refused on devices that expose only named domains.
+
+    The per-domain queries still succeed, so recording this as a collection_error
+    made a healthy device look broken.
+    """
+    from iphone_forensics import collectors
+
+    monkeypatch.setattr(collectors, "run_command", lambda command, timeout=None: {
+        "stdout": b"", "stderr": b"ERROR: Could not connect to diagnostics_relay!",
+        "returncode": 1, "duration_seconds": 0.1, "timed_out": False})
+
+    collection: list = []
+    collectors.save_result(tmp_path, collection, "diagnostics-All",
+                           ["idevicediagnostics", "diagnostics", "All"], 10,
+                           unsupported_markers=collectors.DIAGNOSTICS_UNSUPPORTED_MARKERS)
+    assert collection[0]["status"] == "unsupported", collection[0]["status"]
+    assert collection[0]["status_detail"]

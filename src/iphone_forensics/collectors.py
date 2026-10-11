@@ -16,6 +16,17 @@ LIB_TOOLS = ["idevice_id", "ideviceinfo", "idevicepair", "idevicediagnostics",
 # output (combined with an errored exit) reclassify a run as permission_denied.
 PAIRING_DENIAL_MARKERS = ("denied", "refused")
 
+# When `idevicediagnostics diagnostics All` is refused, the device simply does
+# not expose a catch-all relay domain; the per-domain queries (GasGauge, WiFi,
+# NAND) still work. Recording that as a collection_error made a healthy device
+# look broken, so it is reclassified as `unsupported` — the question does not
+# apply — rather than a failure.
+DIAGNOSTICS_UNSUPPORTED_MARKERS = (
+    "could not connect to diagnostics_relay",
+    "not supported",
+    "no such domain",
+)
+
 
 def decode(value: bytes) -> str:
     return value.decode("utf-8", errors="replace")
@@ -72,7 +83,8 @@ def diagnostic_candidates(payload: bytes, source: str) -> list[dict[str, Any]]:
 def save_result(raw: Path, collection: list[dict[str, Any]], name: str,
                 command: list[str], timeout: int = 45,
                 *, skip: bool = False,
-                denial_markers: tuple[str, ...] | None = None) -> dict[str, Any]:
+                denial_markers: tuple[str, ...] | None = None,
+                unsupported_markers: tuple[str, ...] | None = None) -> dict[str, Any]:
     """Run one bounded command, record its outcome, and return the raw result.
 
     skip=True records a skipped_by_user entry and never spawns a subprocess.
@@ -98,6 +110,13 @@ def save_result(raw: Path, collection: list[dict[str, Any]], name: str,
         if any(marker in text for marker in denial_markers):
             meta["status"] = "permission_denied"
             meta["status_detail"] = "tool reported pairing/trust denial"
+    # A tool that reports the operation is not applicable did not fail, and the
+    # device is not at fault: reclassify rather than count it as an error.
+    if unsupported_markers and meta["status"] == "collection_error":
+        text = (result.get("stdout", b"") + result.get("stderr", b"")).decode("utf-8", "replace").lower()
+        if any(marker in text for marker in unsupported_markers):
+            meta["status"] = "unsupported"
+            meta["status_detail"] = "device or iOS version does not expose this interface"
     collection.append(meta)
     return result
 
@@ -241,13 +260,29 @@ def collect_device(args: Any, run_dir: Path, raw: Path, report: dict[str, Any], 
     else:
         report["findings"].append({"severity":"INFO", "title":"ideviceinfo unavailable",
             "detail":"Native device metadata was not collected. Install libimobiledevice for wider metadata coverage.", "evidence":[]})
+
+    # Storage capacity lives in its own preferences domain. `ideviceinfo -x`
+    # dumps only the *default* domain, and on current iOS that domain has no
+    # TotalDiskCapacity/TotalDataCapacity — so storage capacity silently read as
+    # "not collected" on every modern device while being available one flag away.
+    # Merged into `device` so the storage checks find the keys they look for.
+    if ideviceinfo:
+        disk = save_result(raw, collection, "device-info-disk-usage",
+                           [ideviceinfo, "-u", udid, "-q", "com.apple.disk_usage"], 45)
+        parsed_disk = parse_plist(disk["stdout"])
+        if not isinstance(parsed_disk, dict):
+            parsed_disk = parse_key_values(decode(disk["stdout"]))
+        if isinstance(parsed_disk, dict) and parsed_disk:
+            device = {**device, **parsed_disk}
+
     report["device"] = device
 
     diagnostics = shutil.which("idevicediagnostics")
     report.setdefault("diagnostic_candidates", [])
     if diagnostics:
         for kind in ("All", "GasGauge", "WiFi", "NAND"):
-            result = save_result(raw, collection, f"diagnostics-{kind}", [diagnostics, "-u", udid, "diagnostics", kind], 60)
+            result = save_result(raw, collection, f"diagnostics-{kind}", [diagnostics, "-u", udid, "diagnostics", kind], 60,
+                                 denial_markers=DIAGNOSTICS_UNSUPPORTED_MARKERS)
             report["diagnostic_candidates"].extend(diagnostic_candidates(result["stdout"], f"diagnostics-{kind}"))
         for plane in ("IOPower", "IODeviceTree", "IOService"):
             save_result(raw, collection, f"ioreg-{plane}", [diagnostics, "-u", udid, "ioreg", plane], 60)
