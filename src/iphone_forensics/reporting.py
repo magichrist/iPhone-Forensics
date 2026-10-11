@@ -11,7 +11,7 @@ from typing import Any
 from .buyer import CHECKLIST, evaluate
 from .capabilities import (COVERAGE_LEVELS, category_for_collector, claim_rules, coverage_counts,
                            forbidden_inferences, get_matrix)
-from .util import redact, sha256_file, write_json
+from .util import redact, write_json
 
 # Missing telemetry must stay visibly missing. Never coerce absent data to 0/False/"" —
 # "unknown" and "zero" mean opposite things in a forensic report (spec §12 / report-schema.md).

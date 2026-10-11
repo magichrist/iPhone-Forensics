@@ -64,27 +64,26 @@ install it. It never fails — a missing optional tool is a **WARNING**, not an 
 
 ```console
 $ iphone-forensics devices
-#   #  MODEL            NAME        CONNECTION  TRUST      UDID
-#   1  iPhone 15        Ana's phone USB         validated  …CDEF
+  1. •••••••••••••••••CDEF   (full value kept private in report files)
 
   Next: iphone-forensics inspect
 
 $ iphone-forensics inspect
-  [1/5] discovery        device selected (1 of 1)
-  [2/5] collection       9 collectors
-  [3/5] triage           crash artifacts scanned
-  [4/5] assessment       0 blockers, 2 review items
-  [5/5] report           written
-
-  Sensitive collection is off. App inventory, process list, logs, crash pull,
-  provisioning and backup require consent.
-  Include them for this run? [y/N] N
-
-  Run directory:  ./iphone-forensics-20261011-090721
-  Report:         ./iphone-forensics-20261011-090721/report.html
-  Verdict:        REVIEW — NEGOTIATE OR INVESTIGATE
-  Findings:       1 blocker · 2 review · 5 info
+  [1/5] discovery
+  [2/5] collection
+  [3/5] triage
+  [4/5] assessment
+  [5/5] report
+  Inspection finished.
+  HTML report:  ./iphone-forensics-20261011-090721/report.html
+  JSON data:    ./iphone-forensics-20261011-090721/report.json
+  Manifest:     ./iphone-forensics-20261011-090721/manifest.json
+  Findings:     3 (1 BLOCKER, 2 REVIEW)
 ```
+
+With more than one device attached, and on a terminal, `inspect` asks both
+questions in **one** prompt — pick a device and grant or decline sensitive
+collection together. Press Enter alone to take the first device and decline.
 
 Declining loses nothing: the run still completes, and the skipped items are recorded
 as `skipped_by_user`, never as failures.
@@ -135,35 +134,38 @@ never invents a capture window or takes a backup.
 
 ## Advanced interface
 
-The four commands above are the documented path. For scripting, per-stage control,
-repair cases, and machine-readable output, the full engine stays available as
-`iphone-surgery`:
+The four commands above are the documented path. Every advanced command lives on
+the **same binary** — there is no second executable. (`iphone-surgery` was a
+separate entry point until v5.1; it is retired, and any script still using it will
+keep working because its commands are accepted here.)
 
 ```bash
-iphone-forensics --help-advanced            # lists every flag and subcommand
-iphone-surgery --help
+iphone-forensics --help              # every command
+iphone-forensics --help-advanced     # the hidden legacy collector flags
 ```
 
 ```bash
-iphone-surgery inspect --device <udid> --syslog-seconds 30
-iphone-surgery case --new --udid <udid> --symptoms "battery drains"
-iphone-surgery case --json                  # machine roll-up on stdout
-iphone-surgery capabilities                 # the full capability matrix
-iphone-surgery manual-tests                 # the guided physical test script
-iphone-surgery compare --previous a/report.json --current b/report.json --out diff.json
-iphone-surgery evidence-verify ./iphone-forensics-20261011-090721
+iphone-forensics inspect --device <udid> --syslog-seconds 30
+iphone-forensics case --new --udid <udid> --symptoms "battery drains"
+iphone-forensics case --json                  # machine roll-up on stdout
+iphone-forensics capabilities                 # the full capability matrix
+iphone-forensics manual-tests                 # the guided physical test script
+iphone-forensics compare ./old-run/report.json --current ./new-run/report.json --out diff.json
+iphone-forensics evidence-verify ./iphone-forensics-20261011-090721
 ```
 
 Machine-readable outputs: `buyer --json`, `hardware --json`, `case --json`,
 `compare --out`, `integrity --out`, `checklist --out`, `config --out`.
 
 Exit codes: `0` clean · `1` findings · `2` usage/config · `3` no device ·
-`4` ambiguous device · `5` partial · `6` tool failure.
+`4` ambiguous device.
 
 ### Configuration
 
-`iphone-surgery config --out ./iphone-surgery.json` writes a template, auto-loaded
-on startup. Precedence: **CLI flag > `--config` > `./iphone-surgery.json` > defaults**.
+`iphone-forensics config --out ./iphone-surgery.json` writes a template, auto-loaded
+on startup for **every** command. Precedence: **CLI flag > `--config` >
+`./iphone-surgery.json` > defaults**. (The filename kept the old tool name so
+existing configurations are not silently ignored.)
 
 ### v3/v4 compatibility
 
@@ -188,13 +190,13 @@ sensitive and keep it local.
 
 ```
 src/iphone_forensics/
-├── cli.py           4-command facade (the documented path)
-├── cli_v4.py        advanced engine: 16 subcommands
+├── cli.py           the single CLI: 4-command facade + advanced commands
+├── cli_v4.py        engine: command implementations + subcommand definitions
 ├── collectors.py    discovery + bounded, read-only collection
 ├── hardware.py      battery/storage normalization + subsystem checks
 ├── integrity.py     snapshot comparison, 9 classifications
 ├── analysis.py      findings, assessment, crash triage
-├── buyer.py         20-point checklist and verdicts
+├── buyer.py         21-point checklist and verdicts
 ├── evidence.py      run layout + the single manifest writer
 ├── reporting.py     offline HTML: dashboard, SVG charts, validator
 ├── capabilities.py  capability + claim matrices (source of truth)
@@ -205,7 +207,7 @@ src/iphone_forensics/
 ## Development
 
 ```bash
-python -m pytest -q      # 332 tests, offline: no device required
+python -m pytest -q      # offline: no device required
 python -m ruff check src
 ```
 

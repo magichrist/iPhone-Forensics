@@ -61,7 +61,6 @@ from .cli_v4 import (
     EXIT_CONFIG,
     EXIT_OK,
     _tool_path,
-    add_global_flags,
     add_subcommands,
     cmd_checklist,
     cmd_compare,

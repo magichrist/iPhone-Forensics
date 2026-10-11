@@ -64,8 +64,6 @@ EXIT_FINDINGS = 1       # completed, but review-worthy findings exist
 EXIT_CONFIG = 2         # user/tool configuration problem
 EXIT_NO_DEVICE = 3
 EXIT_AMBIGUOUS_DEVICE = 4
-EXIT_PARTIAL = 5        # ran but with collection gaps
-EXIT_TOOL_FAILURE = 6
 
 # Decision table (docs/v4/phase-1-cli-reliability.md, task 4). Audited per `return`:
 #   0  run finished and nothing review-worthy; also every completed run under
@@ -77,12 +75,15 @@ EXIT_TOOL_FAILURE = 6
 #      invalid config file, a log-capture request above syslog_max_seconds
 #   3  discovery completed and no device was attached
 #   4  discovery completed and more than one device is attached
-#   5  collection ran with gaps (reserved: emitted by report contents, not yet by
-#      a dedicated code path)
-#   6  a discovered tool failed (reserved; not emitted yet)
 # Runs that never reach collection (no toolkit, no device, ambiguous device) never
 # return 0 even under --no-fail-on-findings: nothing was inspected, so success
 # would be a lie to automation.
+#
+# `EXIT_PARTIAL` (5) and `EXIT_TOOL_FAILURE` (6) were once declared here and
+# documented in the README, but no code path ever returned them — a promise a
+# caller could never observe. They are removed rather than left as a trap. A
+# partial run is already reported as `EXIT_FINDINGS` (1) plus explicit
+# `evidence_gap` statuses in the report, which is the honest signal.
 
 SENSITIVE_KEYS = {"SerialNumber", "InternationalMobileEquipmentIdentity", "UniqueDeviceID",
                   "UDID", "WiFiAddress", "BluetoothAddress", "IMEI", "IntegratedCircuitCardIdentity"}
@@ -230,7 +231,6 @@ def _apply_config(args: argparse.Namespace, config: dict[str, Any],
         # so the leak is visible rather than buried, and a non-numeric value is
         # reported rather than raising an uncaught ValueError out of config
         # loading (validate_config catches this on the file-load path).
-        from . import collectors, util
         raw_timeout = config["subprocess_timeout_seconds_default"]
         try:
             timeout = int(raw_timeout)

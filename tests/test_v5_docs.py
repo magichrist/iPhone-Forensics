@@ -75,17 +75,30 @@ def test_every_command_the_readme_shows_actually_exists():
     subparsers = next(action for action in parser._actions
                       if getattr(action, "_choices_actions", None))
     actual = {entry.dest for entry in subparsers._choices_actions}
-    # `--help-advanced` is a documented flag, not a subcommand.
-    flags = {"--help-advanced"}
+    # Global flags are documented in the README but are not subcommands.
+    # `--help`/`--version` are argparse's own and exit via SystemExit, so they are
+    # only checked for existence here; `--help-advanced` is ours and is executed.
+    passthrough_flags = {"--help", "--version"}
+    flags = {"--help-advanced"} | passthrough_flags
     unknown = documented - actual - flags
     assert not unknown, f"README documents non-existent command(s): {sorted(unknown)}"
+
     # And the flag it names really works.
-    for flag in flags & documented:
+    for flag in documented & {"--help-advanced"}:
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
             code = cli.main([flag])
         assert code == cli_v4.EXIT_OK, f"`{flag}` exited {code}"
         assert "advanced" in buffer.getvalue().lower()
+
+    # `--help` and `--version` are argparse built-ins: they must print usage and
+    # exit 0 rather than being routed to the welcome screen.
+    for flag in documented & passthrough_flags:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer), pytest.raises(SystemExit) as caught:
+            cli.main([flag])
+        assert caught.value.code in (0, None), f"`{flag}` exited {caught.value.code}"
+        assert buffer.getvalue().strip(), f"`{flag}` printed nothing"
 
 
 def test_engine_commands_referenced_by_the_readme_exist():
@@ -98,16 +111,31 @@ def test_engine_commands_referenced_by_the_readme_exist():
 
 
 def test_documented_exit_codes_match_the_engine():
-    """Exit codes are a scripting contract; the README must not drift from them."""
+    """Exit codes are a scripting contract; the README must not drift from them.
+
+    Only codes the engine can actually return may be documented. `EXIT_PARTIAL`
+    (5) and `EXIT_TOOL_FAILURE` (6) were declared and advertised for several
+    versions while no code path returned them — a promise automation could never
+    rely on. They have been removed; a partial run is reported as
+    `EXIT_FINDINGS` (1) plus explicit evidence-gap statuses in the report.
+    """
     text = _readme()
-    mapping = {
-        "0": cli_v4.EXIT_OK, "1": cli_v4.EXIT_FINDINGS, "2": cli_v4.EXIT_CONFIG,
-        "3": cli_v4.EXIT_NO_DEVICE, "4": cli_v4.EXIT_AMBIGUOUS_DEVICE,
-        "5": cli_v4.EXIT_PARTIAL, "6": cli_v4.EXIT_TOOL_FAILURE,
+    reachable = {
+        "0": cli_v4.EXIT_OK,
+        "1": cli_v4.EXIT_FINDINGS,
+        "2": cli_v4.EXIT_CONFIG,
+        "3": cli_v4.EXIT_NO_DEVICE,
+        "4": cli_v4.EXIT_AMBIGUOUS_DEVICE,
     }
-    assert len(set(mapping.values())) == len(mapping), "exit codes are not distinct"
-    for documented in mapping:
+    assert len(set(reachable.values())) == len(reachable), "exit codes are not distinct"
+    for documented in reachable:
         assert re.search(rf"`{documented}`", text), f"exit code {documented} undocumented"
+
+    # The removed codes must not creep back into the constants or the README.
+    assert not hasattr(cli_v4, "EXIT_PARTIAL"), "EXIT_PARTIAL is unreachable; remove it"
+    assert not hasattr(cli_v4, "EXIT_TOOL_FAILURE"), "EXIT_TOOL_FAILURE is unreachable; remove it"
+    assert "`5`" not in text and "`6`" not in text, \
+        "exit codes 5 and 6 are no longer returned and must not be documented"
 
 
 def test_readme_shows_the_real_run_directory_layout(tmp_path: Path):
