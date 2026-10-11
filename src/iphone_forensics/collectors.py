@@ -12,6 +12,10 @@ LIB_TOOLS = ["idevice_id", "ideviceinfo", "idevicepair", "idevicediagnostics",
              "idevicecrashreport", "idevicesyslog", "idevicebackup2", "ideviceinstaller",
              "ideviceprovision", "idevicedate", "idevicename", "ideviceimagemounter"]
 
+# Conservative pairing/trust denial vocabulary: only these exact words in tool
+# output (combined with an errored exit) reclassify a run as permission_denied.
+PAIRING_DENIAL_MARKERS = ("denied", "refused")
+
 
 def decode(value: bytes) -> str:
     return value.decode("utf-8", errors="replace")
@@ -66,9 +70,34 @@ def diagnostic_candidates(payload: bytes, source: str) -> list[dict[str, Any]]:
 
 
 def save_result(raw: Path, collection: list[dict[str, Any]], name: str,
-                command: list[str], timeout: int = 45) -> dict[str, Any]:
+                command: list[str], timeout: int = 45,
+                *, skip: bool = False,
+                denial_markers: tuple[str, ...] | None = None) -> dict[str, Any]:
+    """Run one bounded command, record its outcome, and return the raw result.
+
+    skip=True records a skipped_by_user entry and never spawns a subprocess.
+    denial_markers enables a conservative permission_denied reclassification: the
+    marker must appear in the tool output *and* the command must have errored
+    (nonzero exit / timeout), so healthy runs that merely mention the word are
+    left alone.
+    """
+    if skip:
+        meta = write_command_result(raw, name,
+                                    {"command": command, "returncode": None, "stdout": b"",
+                                     "stderr": b"skipped by operator request",
+                                     "duration_seconds": 0.0, "timed_out": False},
+                                    status_override="skipped_by_user",
+                                    status_detail_override="skipped by operator request")
+        collection.append(meta)
+        return {"command": command, "returncode": None, "stdout": b"", "stderr": b"",
+                "duration_seconds": 0.0, "timed_out": False}
     result = run_command(command, timeout=timeout)
     meta = write_command_result(raw, name, result)
+    if denial_markers and meta["status"] == "collection_error":
+        text = (result.get("stdout", b"") + result.get("stderr", b"")).decode("utf-8", "replace").lower()
+        if any(marker in text for marker in denial_markers):
+            meta["status"] = "permission_denied"
+            meta["status_detail"] = "tool reported pairing/trust denial"
     collection.append(meta)
     return result
 
@@ -84,6 +113,14 @@ def discover_devices(raw: Path, collection: list[dict[str, Any]]) -> list[str]:
         res = save_result(raw, collection, "connected-devices-pymobiledevice3", [pmd, "usbmux", "list"], 20)
         text = decode(res["stdout"]) + "\n" + decode(res["stderr"])
         found.extend(re.findall(r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", text))
+    if not idevice_id and not pmd:
+        # No discovery tool at all: record the gap explicitly as tool_missing
+        # instead of silently collecting nothing.
+        collection.append(write_command_result(
+            raw, "connected-devices-discovery",
+            {"command": [], "returncode": None, "stdout": b"",
+             "stderr": b"neither idevice_id nor pymobiledevice3 is installed",
+             "duration_seconds": 0.0, "timed_out": False, "missing_binary": True}))
     unique = list(dict.fromkeys(found))
     (raw / "connected-devices.txt").write_text("\n".join(unique) + ("\n" if unique else ""), encoding="utf-8")
     return unique
@@ -136,7 +173,9 @@ def collect_capabilities(raw: Path, report: dict[str, Any]) -> None:
 def collect_device(args: Any, run_dir: Path, raw: Path, report: dict[str, Any], udid: str) -> None:
     collection = report["collection"]
     if shutil.which("idevicepair"):
-        save_result(raw, collection, "pairing-validation", [shutil.which("idevicepair") or "idevicepair", "-u", udid, "validate"], 20)
+        save_result(raw, collection, "pairing-validation",
+                    [shutil.which("idevicepair") or "idevicepair", "-u", udid, "validate"], 20,
+                    denial_markers=PAIRING_DENIAL_MARKERS)
 
     device: dict[str, Any] = {}
     ideviceinfo = shutil.which("ideviceinfo")

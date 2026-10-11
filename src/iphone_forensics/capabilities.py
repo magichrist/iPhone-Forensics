@@ -335,6 +335,93 @@ CAPABILITIES: list[dict[str, str]] = [
 ]
 
 
+# ----------------------------------------------------------------- claim matrix
+# docs/v5/06-authenticity-honesty.md. Deep investigation, modest claims.
+#
+# Each entry states what evidence a claim requires, and — just as importantly —
+# what must be said instead when that evidence is absent. Anything not listed as
+# permitted is not claimed: absence of evidence is reported as unknown, never
+# upgraded into a healthy verdict or an accusation.
+CLAIM_MATRIX: list[dict[str, str]] = [
+    {
+        "claim": "identifier_reported",
+        "requires": "The field is present in output from a named collector.",
+        "otherwise": "unknown: state that the field was not collected; make no claim.",
+    },
+    {
+        "claim": "battery_metric",
+        "requires": "A unit-verified candidate with its source cited.",
+        "otherwise": ("inconclusive: say the value is unlabelled and must be confirmed in "
+                      "Settings > Battery > Battery Health."),
+    },
+    {
+        "claim": "component_replaced",
+        "requires": ("integrity.classify_assertion() returning replacement_indicated, with a "
+                     "supported source and an artifact behind it."),
+        "otherwise": ("at most change_detected or suspicious from a metadata difference; a "
+                      "diff is not a repair record."),
+    },
+    {
+        "claim": "part_genuine_or_counterfeit",
+        "requires": "Never obtainable with this toolchain.",
+        "otherwise": ("not_detectable, with a pointer to an authorised service provider; "
+                      "Apple exposes no public parts-pairing API."),
+    },
+    {
+        "claim": "faceid_display_sensor_healthy",
+        "requires": "A human recorded the guided manual test as passing.",
+        "otherwise": "manual-check-required: the presence of an identifier proves nothing about health.",
+    },
+    {
+        "claim": "malware_free",
+        "requires": "Never claimed by this tool.",
+        "otherwise": ("report only what triage found; a clean scan means 'no indicators "
+                      "matched', with an explicit false-positive warning."),
+    },
+    {
+        "claim": "never_tampered",
+        "requires": "Never claimed by this tool.",
+        "otherwise": "unknown: absence of contradicting metadata is not evidence of integrity.",
+    },
+]
+
+# Inferences this tool must never draw (docs/v5/06). Each is a tempting shortcut
+# that would turn missing data into either a reassuring or an accusatory claim.
+# `regression-tests` names the test that pins the correct behaviour.
+FORBIDDEN_INFERENCES: list[dict[str, str]] = [
+    {
+        "inference": "missing_battery_metric_means_replaced_battery",
+        "wrong_claim": "A missing battery metric indicates a replaced battery.",
+        "correct": "inconclusive — the metric was not collected; verify in Settings.",
+    },
+    {
+        "inference": "missing_serial_means_tampering",
+        "wrong_claim": "A missing serial number indicates tampering.",
+        "correct": "unknown — the field may simply not be exposed by this tool or iOS version.",
+    },
+    {
+        "inference": "unknown_part_means_genuine_or_counterfeit",
+        "wrong_claim": "An unidentified part is genuine (or counterfeit).",
+        "correct": "not_detectable — refer to an authorised service provider.",
+    },
+    {
+        "inference": "identifier_present_means_component_verified",
+        "wrong_claim": "A present identifier proves biometrics, display or sensors work.",
+        "correct": "manual-check-required — run the guided physical test.",
+    },
+    {
+        "inference": "clean_metadata_means_malware_free",
+        "wrong_claim": "Clean metadata means the device is malware-free.",
+        "correct": "no indicators matched — never a guarantee.",
+    },
+    {
+        "inference": "no_changes_means_device_continuity",
+        "wrong_claim": "Two identical reports prove these are the same physical device.",
+        "correct": "continuity is not_detectable without a hardware-bound identifier.",
+    },
+]
+
+
 # --------------------------------------------------------------------- helpers
 
 def get_matrix() -> list[dict[str, str]]:
@@ -354,3 +441,25 @@ def coverage_counts() -> dict[str, int]:
     for row in CAPABILITIES:
         counts[row["coverage"]] = counts.get(row["coverage"], 0) + 1
     return counts
+
+
+def claim_rules() -> list[dict[str, str]]:
+    """The claim matrix as fresh copies (claim -> required evidence -> fallback wording)."""
+    return [dict(row) for row in CLAIM_MATRIX]
+
+
+def forbidden_inferences() -> list[dict[str, str]]:
+    """The inferences this tool must never draw, with the correct wording."""
+    return [dict(row) for row in FORBIDDEN_INFERENCES]
+
+
+def fallback_for(claim: str) -> str:
+    """The wording to use when *claim* cannot be supported.
+
+    Unknown claims fall back to the most conservative statement the tool can make,
+    so a missing rule can never silently license an unsupported claim.
+    """
+    for row in CLAIM_MATRIX:
+        if row["claim"] == claim:
+            return row["otherwise"]
+    return "unknown: not claimable with this toolchain."

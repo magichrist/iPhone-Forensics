@@ -10,6 +10,39 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .models import normalize_status
+
+REDACTED = "••••"
+
+
+def redact(value: Any) -> str:
+    """Mask an identifier, keeping only its last four characters.
+
+    The single redaction helper for the whole toolchain (docs/v5/07). Console
+    output, HTML, JSON and evidence all go through here, so a masked value looks
+    the same everywhere.
+
+    An absent value stays absent: ``None``, ``""`` and ``0``-length values render
+    as ``""``, never as a mask. Rendering "••••" for a missing identifier would
+    claim a value was hidden when none was ever collected.
+    """
+    text = str(value if value is not None else "")
+    if not text:
+        return ""
+    if len(text) <= 4:
+        return REDACTED
+    return "•" * max(4, len(text) - 4) + text[-4:]
+
+# v5 readers written against the v4 vocabulary (analysis.py, reporting.py) compare
+# status strings for equality.  They must migrate to `normalize_status()` (or consult
+# this map) before they can consume v5 statuses; exported here so the follow-up is a
+# one-line change rather than a re-derivation.  Values mirror models._LEGACY_STATUS_ALIASES.
+STATUS_ALIASES_FOR_READERS: dict[str, str] = {
+    "success": "collected",
+    "expected_end": "collected",
+    "failed_or_partial": "collection_error",
+}
+
 
 def utc_now() -> str:
     return dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
@@ -47,9 +80,13 @@ def run_command(command: list[str], timeout: int = 45) -> dict[str, Any]:
                 "stderr": exc.stderr or b"", "duration_seconds": round(time.monotonic() - started, 3),
                 "timed_out": True}
     except OSError as exc:
+        # ENOENT/EACCES surface here.  Record which, so write_command_result can
+        # distinguish "tool not installed" (tool_missing) from other OS errors.
+        missing = isinstance(exc, FileNotFoundError)
         return {"command": command, "returncode": None, "stdout": b"",
                 "stderr": str(exc).encode(), "duration_seconds": round(time.monotonic() - started, 3),
-                "timed_out": False}
+                "timed_out": False, "missing_binary": missing,
+                "os_error_type": type(exc).__name__}
 
 
 def capture_stream(command: list[str], seconds: int, output_path: Path) -> dict[str, Any]:
@@ -59,6 +96,7 @@ def capture_stream(command: list[str], seconds: int, output_path: Path) -> dict[
     started = time.monotonic()
     timed_out = False
     returncode: int | None = None
+    missing_binary = False
     try:
         with output_path.open("wb") as output, tempfile.TemporaryFile() as errors:
             proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=output,
@@ -78,18 +116,54 @@ def capture_stream(command: list[str], seconds: int, output_path: Path) -> dict[
             stderr_data = errors.read(1024 * 1024)
     except OSError as exc:
         stderr_data = str(exc).encode()
+        missing_binary = isinstance(exc, FileNotFoundError)
     return {"command": command, "returncode": returncode,
             "stdout": output_path.read_bytes() if output_path.exists() else b"",
             "stderr": stderr_data, "duration_seconds": round(time.monotonic() - started, 3),
             "timed_out": timed_out, "expected_stream_end": timed_out,
-            "stream_output_path": str(output_path)}
+            "stream_output_path": str(output_path),
+            "missing_binary": missing_binary}
 
 
-def write_command_result(raw_dir: Path, name: str, result: dict[str, Any]) -> dict[str, Any]:
+def write_command_result(raw_dir: Path, name: str, result: dict[str, Any],
+                         *, status_override: str | None = None,
+                         status_detail_override: str | None = None) -> dict[str, Any]:
+    """Persist one command outcome and label it with a v5 collection status.
+
+    Precedence: explicit overrides (used by callers with context this layer
+    cannot see, e.g. skip flags or pairing-denial parsing) > cause inference
+    (missing binary / bounded stream end / timeout / exit code).  The emitted
+    status is always normalized through models.normalize_status, so it stays
+    inside COLLECTION_STATUSES and old readers keep working on read.
+    """
     stdout_file = f"{safe_name(name)}.stdout.txt"
     stderr_file = f"{safe_name(name)}.stderr.txt"
     (raw_dir / stdout_file).write_bytes(result.get("stdout", b""))
     (raw_dir / stderr_file).write_bytes(result.get("stderr", b""))
+
+    status: str
+    detail: str
+    if result.get("missing_binary"):
+        status, detail = "tool_missing", "executable not found on PATH"
+    elif result.get("expected_stream_end"):
+        # A bounded log capture ends by hitting its deadline; that is the design,
+        # not a failure.  timed_out stays True so readers can see what happened.
+        status, detail = "collected", "expected_stream_end (bounded log capture)"
+    elif result.get("timed_out"):
+        status, detail = "collection_error", "command exceeded its timeout"
+    elif result.get("returncode") == 0:
+        status, detail = "collected", "exit code 0"
+    else:
+        status, detail = "collection_error", f"exit code {result.get('returncode')}"
+
+    if status_override:
+        status = normalize_status(status_override)
+        if status_detail_override:
+            detail = status_detail_override
+    elif status_detail_override:
+        detail = status_detail_override
+    status = normalize_status(status)
+
     return {
         "name": name, "command": result.get("command", []),
         "returncode": result.get("returncode"),
@@ -99,9 +173,7 @@ def write_command_result(raw_dir: Path, name: str, result: dict[str, Any]) -> di
         "stdout_file": stdout_file, "stderr_file": stderr_file,
         "stdout_bytes": len(result.get("stdout", b"")),
         "stderr_bytes": len(result.get("stderr", b"")),
-        "status": ("success" if result.get("returncode") == 0 and not result.get("timed_out")
-                   else "expected_end" if result.get("expected_stream_end")
-                   else "failed_or_partial"),
+        "status": status, "status_detail": detail,
     }
 
 
