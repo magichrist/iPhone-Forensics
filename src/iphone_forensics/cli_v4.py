@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import platform
 import shutil
 import sys
@@ -25,15 +26,29 @@ from .analysis import (
 )
 from .buyer import template as buyer_template
 from .collectors import LIB_TOOLS, collect_capabilities, collect_device, discover_devices
-from .evidence import build_manifest, verify_manifest
+from .evidence import (
+    EVIDENCE_DIR_NAME,
+    SCHEMA_VERSION,
+    build_manifest,
+    run_dir_paths,
+    verify_manifest,
+    write_readme_txt,
+)
 from .hardware import assess_hardware, manual_subsystem_checks
 from .integrity import assess_integrity
 from .reporting import finalize
-from .util import secure_mkdir, write_json
+from .util import redact as util_redact
+from .util import run_command, write_json
 
 PROGRAM = "iphone-surgery"
 CONFIG_FILENAME = "iphone-surgery.json"
-DEFAULT_OUTPUT_ROOT = str(Path.home() / "Desktop" / "iphone-forensics")
+# Empty string = the current working directory: Path("") resolves to the CWD,
+# so the default needs no special case in any consumer.
+DEFAULT_OUTPUT_ROOT = ""
+# Written into config templates by `config --out` and resolved to the real CWD
+# when a config is applied, so a template copied between machines still means
+# "wherever you run the tool". Documented in `config --help`.
+CWD_OUTPUT_MARKER = "<current-working-directory>"
 
 # Stable exit codes so automation can branch on them reliably.
 EXIT_OK = 0
@@ -67,8 +82,8 @@ REDACTED = "••••"
 
 
 def redact(value: Any) -> str:
-    text = str(value or "")
-    return REDACTED if len(text) <= 4 else "•" * (len(text) - 4) + text[-4:]
+    """Mask an identifier. Delegates to the single util helper (docs/v5/07)."""
+    return util_redact(value)
 
 
 def _tool_path(name: str) -> str | None:
@@ -89,7 +104,7 @@ def default_config() -> dict[str, Any]:
     """Documented configuration defaults; identical to what `config --out` writes."""
     return {
         "schema_version": "4.0.0",
-        "output_root": DEFAULT_OUTPUT_ROOT,
+        "output_root": CWD_OUTPUT_MARKER,
         "safe_name_max_length": 100,
         "subprocess_timeout_seconds_default": 45,
         "syslog_max_seconds": 120,
@@ -166,7 +181,11 @@ def _apply_config(args: argparse.Namespace, config: dict[str, Any],
     # --output parses with argparse.SUPPRESS, so the attribute exists only when
     # the flag was actually passed: the config fills the gap, a CLI flag wins.
     if not hasattr(args, "output"):
-        args.output = str(Path(config["output_root"]).expanduser())
+        configured = str(Path(config["output_root"]).expanduser())
+        # The template marker (and an empty value, which Path renders as ".")
+        # mean "the directory this run starts in"; resolve it here so every
+        # downstream consumer sees a real path.
+        args.output = str(Path.cwd()) if configured in (".", CWD_OUTPUT_MARKER) else configured
     # Console identifiers are always redacted regardless of config. The config
     # flag additionally enables the report-redacted.{html,json} exports, exactly
     # as if --redact had been passed (only when a config file was loaded, so
@@ -244,6 +263,17 @@ def cmd_welcome(args: argparse.Namespace) -> int:
 
 # ---------------------------------------------------------------- commands
 
+def _probe_version(path: str) -> str:
+    """Best-effort version string from a tool's --help first line. Never raises."""
+    try:
+        res = run_command([path, "--help"], timeout=10)
+        text = (res.get("stdout", b"") + b"\n" + res.get("stderr", b"")).decode("utf-8", "replace")
+        first_line = text.strip().splitlines()[0].strip() if text.strip() else ""
+        return first_line or "unknown version"
+    except Exception:  # noqa: BLE001 - a doctor probe must never raise, whatever the tool does
+        return "unknown version"
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Check toolchain, pairing, and device reachability; report feature availability."""
     print(f"iphone-surgery v{__version__} — doctor\n")
@@ -262,12 +292,29 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"pymobiledevice3:        {'✓ ' + pmd if pmd else '— not installed (optional)'}")
     print(f"mvt-ios:                {'✓ ' + mvt if mvt else '— not installed (optional, for backup triage)'}")
 
+    # Output writability + free space on the resolved output root (default CWD).
+    output_root = Path(getattr(args, "output", None) or Path.cwd()).expanduser().resolve()
+    try:
+        free_bytes = shutil.disk_usage(output_root).free
+        free_mb = free_bytes / (1024 * 1024)
+        if os.access(output_root, os.W_OK):
+            print(f"Output writable:         ✓ {output_root} ({free_mb:.0f} MB free)")
+        else:
+            print(f"Output writable:         ⚠ NOT WRITABLE: {output_root} ({free_mb:.0f} MB free)")
+    except OSError as exc:
+        print(f"Output writable:         ⚠ could not check {output_root}: {exc}")
+
+    # Tool versions via --help probe (never execute device commands).
+    ideviceinfo = shutil.which("ideviceinfo")
+    print(f"ideviceinfo version:     {_probe_version(ideviceinfo) if ideviceinfo else 'unknown version'}")
+    print(f"pymobiledevice3 version: {_probe_version(pmd) if pmd else 'unknown version'}")
+
     devices: list[str] = []
     if lbd or pmd:
         try:
             collection_probe: list[dict[str, Any]] = []
             raw_probe = (Path(getattr(args, "output", None)
-                          or (Path.home() / "Desktop" / "iphone-forensics")).expanduser()
+                          or Path.cwd()).expanduser()
                          / "doctor-probe")
             raw_probe.mkdir(parents=True, exist_ok=True, mode=0o700)
             devices = discover_devices(raw_probe, collection_probe)
@@ -319,7 +366,7 @@ def _collect_full(args: argparse.Namespace, run_dir: Path, report: dict[str, Any
         pmd_app_list = args.pmd_app_list
         backup = args.backup
 
-    raw = run_dir / "raw"
+    raw = run_dir / EVIDENCE_DIR_NAME
     udid = report["target_udid"]
     if not args.no_capability_catalog:
         collect_capabilities(raw, report)
@@ -367,8 +414,8 @@ def cmd_inspect(args: argparse.Namespace) -> int:
 
     console = _Console(args)
     run_dir = _new_run_dir(args)
-    raw = run_dir / "raw"
-    raw.mkdir(mode=0o700)
+    # run_dir_paths() already created the evidence/ directory (mode 0700).
+    raw = run_dir / EVIDENCE_DIR_NAME
     report = _new_report(args)
 
     if args.backup_dir:
@@ -402,13 +449,13 @@ def cmd_inspect(args: argparse.Namespace) -> int:
             report["findings"].append({"severity": "WARNING",
                 "title": "Requested device not in discovery output",
                 "detail": "May be disconnected, unpaired, or on a transport this probe does not enumerate.",
-                "evidence": ["raw/connected-devices.txt"]})
+                "evidence": [f"{EVIDENCE_DIR_NAME}/connected-devices.txt"]})
     elif len(devices) == 1:
         udid = devices[0]
     elif not devices:
         report["findings"].append({"severity": "BLOCKER", "title": "No connected device detected",
             "detail": "Unlock the iPhone, use a data-capable cable, approve Trust This Computer, retry.",
-            "evidence": ["raw/connected-devices.txt"]})
+            "evidence": [f"{EVIDENCE_DIR_NAME}/connected-devices.txt"]})
         _finish_run(run_dir, report, buyer_data, args, console, first_stage=2)
         print("No device detected. Run `iphone-surgery doctor` to debug.")
         _print_summary(run_dir, report, console)
@@ -416,7 +463,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     else:
         report["findings"].append({"severity": "BLOCKER", "title": "Multiple devices detected",
             "detail": "Rerun with --device <udid> for the intended phone.",
-            "evidence": ["raw/connected-devices.txt"]})
+            "evidence": [f"{EVIDENCE_DIR_NAME}/connected-devices.txt"]})
         _finish_run(run_dir, report, buyer_data, args, console, first_stage=2)
         print(f"{len(devices)} devices detected — rerun with --device <udid>. "
               "Full values are kept in this run's report.json.")
@@ -488,7 +535,7 @@ def _inspect_backup(args: argparse.Namespace, run_dir: Path, report: dict[str, A
                 skipped += 1
                 continue
             rel_parent = path.relative_to(source).parent
-            dest_dir = run_dir / "raw" / "offline-evidence" / rel_parent
+            dest_dir = run_dir / EVIDENCE_DIR_NAME / "offline-evidence" / rel_parent
             dest_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             _shutil.copy2(path, dest_dir / path.name)
             copied += 1
@@ -504,14 +551,14 @@ def _inspect_backup(args: argparse.Namespace, run_dir: Path, report: dict[str, A
         "name": "offline-artifact-copy", "command": [], "returncode": 0,
         "duration_seconds": round(time.monotonic() - started, 3), "timed_out": False,
         "expected_stream_end": False, "stdout_file": "", "stderr_file": "",
-        "stdout_bytes": 0, "stderr_bytes": 0, "status": "success",
+        "stdout_bytes": 0, "stderr_bytes": 0, "status": "collected",
         "detail": f"{copied} artifact(s) copied from {source}, {skipped} skipped",
     })
 
     mvt = shutil.which("mvt-ios")
     if mvt:
         from .cli import _run_mvt_backup  # reuse the v3 implementation
-        _run_mvt_backup(str(source), run_dir, run_dir / "raw", report)
+        _run_mvt_backup(str(source), run_dir, run_dir / EVIDENCE_DIR_NAME, report)
     else:
         report["findings"].append({"severity": "INFO", "title": "MVT not installed",
             "detail": "Install mvt-ios separately for malicious-indicator scanning of the backup.",
@@ -997,22 +1044,25 @@ _SILENT_CONSOLE = _Console(argparse.Namespace(quiet=True))
 
 
 def _new_run_dir(args: argparse.Namespace) -> Path:
+    """Create this run's directory via the single layout helper.
+
+    `evidence.run_dir_paths` is the only place that knows the run-dir naming
+    and the `evidence/` split (docs/v5/03-output-layout.md). Naming the directory
+    here as well is what previously let `compare`'s auto-discovery miss every
+    run it had just produced.
+    """
     output_root = Path(args.output).expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_dir = output_root / f"iphone-audit-{stamp}"
-    suffix = 1
-    while run_dir.exists():
-        run_dir = output_root / f"iphone-audit-{stamp}-{suffix}"
-        suffix += 1
-    secure_mkdir(run_dir)
-    return run_dir
+    # UTC, so a run directory is unambiguous no matter where it was produced.
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
+    paths = run_dir_paths(output_root, stamp)
+    return paths["run_dir"]
 
 
 def _new_report(args: argparse.Namespace) -> dict[str, Any]:
     from .cli import LIMITATIONS  # reuse the canonical v3 limitations list
     return {
-        "project": "iPhone Forensics", "schema_version": "4.0.0", "version": __version__,
+        "project": "iPhone Forensics", "schema_version": SCHEMA_VERSION, "version": __version__,
         "started_at": dt.datetime.now(dt.UTC).isoformat(),
         "finished_at": None,
         "host": {"platform": platform.platform(), "macOS": platform.mac_ver()[0],
@@ -1023,12 +1073,37 @@ def _new_report(args: argparse.Namespace) -> dict[str, Any]:
         "hardware_assessment": None, "integrity_assessment": None,
         "scope": {
             "read_only": True,
+            # Whether sensitive collection was allowed for THIS run, and why.
+            # `granted` means an operator consented or named the collectors;
+            # `declined` means consent was asked for and refused (or the session
+            # was non-interactive); `not_requested` means no consent gate was
+            # presented, i.e. a direct engine/advanced invocation.
+            # Items named explicitly on the command line are listed so a run
+            # never leaves it ambiguous what was collected with what authority.
+            "sensitive_collection": _sensitive_consent_state(args),
+            "sensitive_collection_items": list(getattr(args, "sensitive_explicit", []) or []),
             "backup_requested": getattr(args, "backup", "none") != "none",
             "logs_requested": bool(getattr(args, "syslog_seconds", 0) or getattr(args, "pmd_syslog_seconds", 0)),
             "crash_reports_requested": bool(getattr(args, "crash_reports", False) or getattr(args, "pmd_crash_reports", False)),
             "app_inventory_requested": bool(getattr(args, "app_list", False) or getattr(args, "pmd_app_list", False)),
         },
     }
+
+
+def _sensitive_consent_state(args: argparse.Namespace) -> str:
+    """Describe the consent outcome for sensitive collection in this run.
+
+    Three honest states, never a guess:
+      granted       - an operator consented, or named the collectors explicitly
+      declined      - consent was declined, refused, or unavailable non-interactively
+      not_requested - the engine was invoked directly (no consent gate presented)
+
+    Declining is never a failure: it simply means those items stay
+    `skipped_by_user` in the collection log.
+    """
+    if not hasattr(args, "sensitive_consent"):
+        return "not_requested"
+    return "granted" if args.sensitive_consent else "declined"
 
 
 def _triage_crash_artifacts(run_dir: Path, report: dict[str, Any]) -> dict[str, Any]:
@@ -1103,6 +1178,17 @@ def _finish_run(run_dir: Path, report: dict[str, Any], buyer_data: dict[str, Any
 
     console.stage(5)
     finalize(run_dir, report, redact_identifiers=args.redact)
+    # README before the manifest: the manifest must describe exactly what the run
+    # left on disk, and a README written afterwards would verify as "added since
+    # hashing" — the run dir would never reach a clean verification.
+    argv = list(getattr(sys, "argv", []) or [])
+    write_readme_txt(run_dir, {
+        "version": __version__,
+        "generated": report.get("started_at"),
+        "finished": report.get("finished_at"),
+        "device": report.get("device") if isinstance(report.get("device"), dict) else None,
+        "command": " ".join(["iphone-surgery", *argv[1:]]) if len(argv) > 1 else None,
+    })
     build_manifest(run_dir)
     console.stage_done(5)
 
@@ -1179,7 +1265,7 @@ def build_parser() -> argparse.ArgumentParser:
                 "  iphone-surgery inspect --buyer-json ~/checklist.json\n"
                 "  iphone-surgery inspect --backup-dir ~/backup-2026-01-01 --redact\n"
                 "  iphone-surgery integrity --previous old.json --current new.json\n"
-                "  iphone-surgery evidence-verify ~/Desktop/iphone-forensics/iphone-audit-20260101-120000\n"
+                "  iphone-surgery evidence-verify ./iphone-audit-20260101-120000\n"
                 "\n"
                 f"Config: ./{CONFIG_FILENAME} is auto-loaded when present; --config PATH overrides it.\n"
                 "Precedence: CLI flag > --config PATH > "
@@ -1190,7 +1276,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--interactive", action="store_true",
                         help="Prompt for the next action on the welcome screen (only when stdin is a TTY)")
     parser.add_argument("--output", default=argparse.SUPPRESS,
-                        help="Output root directory (default: ~/Desktop/iphone-forensics; "
+                        help="Output root directory (default: the current working directory; "
                              "config: output_root)")
     parser.add_argument("--quiet", action="store_true", default=argparse.SUPPRESS,
                         help="Suppress progress chatter; print only the summary and errors.")
@@ -1203,7 +1289,7 @@ def build_parser() -> argparse.ArgumentParser:
         # SUPPRESS defaults: a subparser default would otherwise clobber a value
         # parsed before the subcommand name (argparse namespace reuse).
         p.add_argument("--output", default=argparse.SUPPRESS,
-                       help="Output root directory (default: ~/Desktop/iphone-forensics; "
+                       help="Output root directory (default: the current working directory; "
                             "config: output_root)")
         p.add_argument("--config", metavar="PATH", default=argparse.SUPPRESS,
                        help=f"Load configuration JSON from PATH (default: ./{CONFIG_FILENAME} when present)")
@@ -1314,7 +1400,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", help="Write combined comparison JSON here")
     p.set_defaults(func=cmd_compare)
 
-    p = sub.add_parser("config", help="Write or validate the tool configuration")
+    p = sub.add_parser("config", help="Write or validate the tool configuration "
+                                   "(default output_root: <current-working-directory>)")
     p.add_argument("--check", help="Validate an existing config file")
     p.add_argument("--out", help="Where to write the template (default ./iphone-surgery.json)")
     p.add_argument("--force", action="store_true", help="Overwrite")
