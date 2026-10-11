@@ -1,4 +1,9 @@
-"""v4 CLI: `iphone-surgery`, organized into subcommands.
+"""Engine: the command implementations behind `iphone-forensics`.
+
+This module owns every `cmd_*` handler and the subcommand definitions
+(:func:`add_subcommands`). It no longer ships its own console script — the
+documented interface is the single `iphone-forensics` binary in :mod:`cli`, which
+mounts these subcommands and layers the four-command facade on top.
 
 Zero new runtime dependencies. Each command has a real, documented purpose and
 works without a connected device where that is meaningful.
@@ -41,7 +46,7 @@ from .util import redact as util_redact
 from .util import run_command, write_json
 
 PROGRAM = "iphone-forensics"
-# The engine's former standalone name. Kept only so the deprecated `iphone-surgery`
+# The engine's former standalone name. Kept only so the deprecated `iphone-forensics`
 # entry point can still build a parser that says so in its own help text.
 LEGACY_PROGRAM = "iphone-surgery"
 CONFIG_FILENAME = "iphone-surgery.json"
@@ -177,6 +182,23 @@ def load_config(explicit_path: str | None = None) -> tuple[dict[str, Any], list[
     return config, sources
 
 
+def set_default_timeout(timeout: int) -> None:
+    """Replace the default subprocess timeout used by the collectors.
+
+    Threading a configured timeout through every `run_command` call site would be
+    the clean fix; until then this rebinds the two functions' defaults. Named and
+    documented because the change is process-global and permanent for the life of
+    the interpreter — a library caller that imports this module and later runs its
+    own collection inherits the timeout from whatever config was loaded here.
+    """
+    from . import collectors, util
+
+    if len(util.run_command.__defaults__ or ()) == 1:
+        util.run_command.__defaults__ = (timeout,)
+    if len(collectors.save_result.__defaults__ or ()) == 1:
+        collectors.save_result.__defaults__ = (timeout,)
+
+
 def _apply_config(args: argparse.Namespace, config: dict[str, Any],
                   sources: list[Path]) -> None:
     """Apply the effective config to the parsed args; explicit CLI flags still win."""
@@ -200,12 +222,23 @@ def _apply_config(args: argparse.Namespace, config: dict[str, Any],
         # collectors.save_result() honour an explicit per-call timeout first
         # (crash pulls, backups); the configured value replaces their *defaults*
         # for any call that relies on them.
+        #
+        # Rebinding `__defaults__` mutates module-global function state that is
+        # never restored, so it leaks into any library caller running in the same
+        # interpreter after a single CLI invocation. It is kept because that is
+        # how the timeout is threaded today, but it is confined to a named helper
+        # so the leak is visible rather than buried, and a non-numeric value is
+        # reported rather than raising an uncaught ValueError out of config
+        # loading (validate_config catches this on the file-load path).
         from . import collectors, util
-        timeout = int(config["subprocess_timeout_seconds_default"])
-        if len(util.run_command.__defaults__ or ()) == 1:
-            util.run_command.__defaults__ = (timeout,)
-        if len(collectors.save_result.__defaults__ or ()) == 1:
-            collectors.save_result.__defaults__ = (timeout,)
+        raw_timeout = config["subprocess_timeout_seconds_default"]
+        try:
+            timeout = int(raw_timeout)
+        except (TypeError, ValueError):
+            print(f"config: ignoring non-numeric subprocess_timeout_seconds_default "
+                  f"{raw_timeout!r}", file=sys.stderr)
+        else:
+            set_default_timeout(timeout)
 
 
 # ---------------------------------------------------------------- welcome
@@ -216,7 +249,7 @@ def _device_count_summary(tools_available: bool) -> str:
         return "unknown — no discovery toolkit installed"
     try:
         # Probe into a temp dir: the welcome screen must leave no files behind.
-        with tempfile.TemporaryDirectory(prefix="iphone-surgery-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="iphone-forensics-") as tmp:
             devices = discover_devices(Path(tmp), [])
     except Exception as exc:  # noqa: BLE001 — welcome must never crash (same policy as doctor)
         return f"unknown — discovery failed ({str(exc)[:80]})"
@@ -231,7 +264,7 @@ def cmd_welcome(args: argparse.Namespace) -> int:
     Non-interactive by default and automation-safe: no prompt is shown unless
     --interactive is passed AND stdin is a TTY. Always exits 0.
     """
-    print(f"iphone-surgery v{__version__} — hardware-first iPhone diagnostics, "
+    print(f"iphone-forensics v{__version__} — hardware-first iPhone diagnostics, "
           "integrity assessment, buyer & repair workflows")
     print()
     lbd_count = sum(1 for name in LIB_TOOLS if shutil.which(name))
@@ -248,15 +281,15 @@ def cmd_welcome(args: argparse.Namespace) -> int:
     print("Prerequisites:    iPhone unlocked · Trust This Computer approved · data-capable cable.")
     print()
     print("Next actions:")
-    print("  iphone-surgery doctor                       toolchain, pairing, reachability check")
-    print("  iphone-surgery inspect --backup-dir <dir>   offline analysis of a backup (no device)")
-    print("  iphone-surgery capabilities                 what software can and cannot verify")
-    print("  iphone-surgery --help                       all 16 subcommands")
+    print("  iphone-forensics doctor                       toolchain, pairing, reachability check")
+    print("  iphone-forensics inspect --backup-dir <dir>   offline analysis of a backup (no device)")
+    print("  iphone-forensics capabilities                 what software can and cannot verify")
+    print("  iphone-forensics --help                       all 16 subcommands")
     # Only prompt when explicitly requested on a real terminal; scripts (stdin
     # closed or piped) always fall through to EXIT_OK without reading stdin.
     if getattr(args, "interactive", False) and sys.stdin.isatty():
         try:
-            answer = input("\nRun `iphone-surgery doctor` now? [y/N]: ").strip().lower()
+            answer = input("\nRun `iphone-forensics doctor` now? [y/N]: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             answer = ""
         if answer in {"y", "yes", "d", "doctor"}:
@@ -279,7 +312,7 @@ def _probe_version(path: str) -> str:
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Check toolchain, pairing, and device reachability; report feature availability."""
-    print(f"iphone-surgery v{__version__} — doctor\n")
+    print(f"iphone-forensics v{__version__} — doctor\n")
 
     python_ok = sys.version_info >= (3, 11)
     print(f"Python {sys.version.split()[0]} (needs >= 3.11): {'OK' if python_ok else 'TOO OLD'}")
@@ -316,11 +349,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if lbd or pmd:
         try:
             collection_probe: list[dict[str, Any]] = []
-            raw_probe = (Path(getattr(args, "output", None)
-                          or Path.cwd()).expanduser()
-                         / "doctor-probe")
-            raw_probe.mkdir(parents=True, exist_ok=True, mode=0o700)
-            devices = discover_devices(raw_probe, collection_probe)
+            # A throwaway directory, not a permanent one. Writing `doctor-probe/`
+            # into the working directory left a stray directory behind on every
+            # `doctor` run, and nothing in that directory is ever read.
+            with tempfile.TemporaryDirectory(prefix="iphone-forensics-doctor-") as probe:
+                raw_probe = Path(probe) / "doctor-probe"
+                raw_probe.mkdir(parents=True, mode=0o700)
+                devices = discover_devices(raw_probe, collection_probe)
         except Exception as exc:  # doctor must never crash on odd tool behavior
             print(f"device discovery probe failed: {exc}")
     print(f"\nDevice discovery: {'none detected' if not devices else f'{len(devices)} device(s)'}")
@@ -330,17 +365,24 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     mode = "full" if lbd else ("partial (pymobiledevice3 only)" if pmd else "offline analysis only")
     print(f"\nOperational mode: {mode}")
     if not lbd:
-        print("Offline workflows still work: `iphone-surgery inspect --backup-dir <dir>`,")
-        print("`iphone-surgery report <dir>`, `iphone-surgery compare <prev> <curr>`,")
-        print("`iphone-surgery evidence verify <dir-or-manifest>`.")
+        print("Offline workflows still work: `iphone-forensics inspect --backup-dir <dir>`,")
+        print("`iphone-forensics report <dir>`, `iphone-forensics compare <prev> <curr>`,")
+        print("`iphone-forensics evidence verify <dir-or-manifest>`.")
     return EXIT_OK
 
 
 def cmd_devices(args: argparse.Namespace) -> int:
     collection: list[dict[str, Any]] = []
-    out_root = Path(args.output).expanduser() / "devices-probe"
-    out_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    devices = discover_devices(out_root, collection)
+    # Throwaway probe directory. `devices` only needs somewhere to put the
+    # discovery subprocess output, and nothing reads it afterwards, so leaving a
+    # `devices-probe/` behind in the working directory served no purpose.
+    probe_dir = tempfile.TemporaryDirectory(prefix="iphone-forensics-devices-")
+    try:
+        out_root = Path(probe_dir.name) / "devices-probe"
+        out_root.mkdir(parents=True, mode=0o700)
+        devices = discover_devices(out_root, collection)
+    finally:
+        probe_dir.cleanup()
     if not devices:
         print("No connected device detected.")
         print("Check: cable carries data (not charge-only), phone unlocked, Trust This Computer approved,")
@@ -435,12 +477,12 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         report["findings"].append({
             "severity": "BLOCKER", "title": "No supported toolkit detected",
             "detail": ("Install libimobiledevice (`brew install libimobiledevice`) and/or pymobiledevice3, or run "
-                       "offline analysis with `iphone-surgery inspect --backup-dir <dir>`."),
+                       "offline analysis with `iphone-forensics inspect --backup-dir <dir>`."),
             "evidence": []})
         # first_stage=2: nothing was collected, so this is not a completed run and
         # --no-fail-on-findings must not report it as a success.
         _finish_run(run_dir, report, buyer_data, args, console, first_stage=2)
-        print("No supported toolkit detected. Run `iphone-surgery doctor` for options.")
+        print("No supported toolkit detected. Run `iphone-forensics doctor` for options.")
         _print_summary(run_dir, report, console)
         return _exit_for(report, args, completed=False)
 
@@ -460,7 +502,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
             "detail": "Unlock the iPhone, use a data-capable cable, approve Trust This Computer, retry.",
             "evidence": [f"{EVIDENCE_DIR_NAME}/connected-devices.txt"]})
         _finish_run(run_dir, report, buyer_data, args, console, first_stage=2)
-        print("No device detected. Run `iphone-surgery doctor` to debug.")
+        print("No device detected. Run `iphone-forensics doctor` to debug.")
         _print_summary(run_dir, report, console)
         return EXIT_NO_DEVICE
     else:
@@ -668,7 +710,7 @@ def cmd_checklist(args: argparse.Namespace) -> int:
     write_json(target, buyer_template())
     print(f"Buyer checklist template written: {target}")
     print("Edit statuses to pass/fail/not_tested/not_applicable, then run:")
-    print(f"  iphone-surgery inspect --buyer-json {target}")
+    print(f"  iphone-forensics inspect --buyer-json {target}")
     return EXIT_OK
 
 
@@ -1194,7 +1236,7 @@ def _finish_run(run_dir: Path, report: dict[str, Any], buyer_data: dict[str, Any
         "generated": report.get("started_at"),
         "finished": report.get("finished_at"),
         "device": report.get("device") if isinstance(report.get("device"), dict) else None,
-        "command": " ".join(["iphone-surgery", *argv[1:]]) if len(argv) > 1 else None,
+        "command": " ".join([PROGRAM, *argv[1:]]) if len(argv) > 1 else None,
     })
     build_manifest(run_dir)
     console.stage_done(5)
@@ -1438,7 +1480,7 @@ def add_global_flags(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     """The engine's own standalone parser.
 
-    Retained so `iphone-surgery` keeps working as a deprecated alias and so
+    Retained so `iphone-forensics` keeps working as a deprecated alias and so
     tests can inspect the engine surface directly. The documented interface is
     the unified ``iphone-forensics`` parser in :mod:`iphone_forensics.cli`.
     """
@@ -1464,10 +1506,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Deprecated `iphone-surgery` entry point.
+    """Deprecated `iphone-forensics` entry point.
 
     Forwards to the unified ``iphone-forensics`` CLI so the two names can never
-    behave differently. `iphone-surgery` is no longer installed as a console
+    behave differently. `iphone-forensics` is no longer installed as a console
     script; this stays for anything importing the function directly.
     """
     from .cli import main as unified_main
