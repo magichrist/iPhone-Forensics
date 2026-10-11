@@ -251,6 +251,40 @@ _EPISTEMIC_PILL_CSS = "".join(
 )
 
 
+def _audit_claim_matrix(report: dict[str, Any]) -> dict[str, Any]:
+    """Run every claim gate and return the audit record stored in report.json.
+
+    A violation is surfaced, never silently dropped: it is recorded, printed, and
+    added as a BLOCKER finding, so a claim the matrix forbids is visible to whoever
+    reads the report rather than quietly missing.
+    """
+    from .capabilities import audit_report
+    from .hardware import audit_battery_claims
+    from .integrity import audit_integrity_claims
+
+    violations = audit_report(report) + audit_battery_claims(report) + audit_integrity_claims(report)
+    for violation in violations:
+        # Cosmetic only: an audit failure must never stop a report being written.
+        print(f"[report] claim audit: {violation}", file=sys.stderr)
+        if isinstance(report.get("findings"), list):
+            report["findings"].append({
+                "severity": "BLOCKER",
+                "title": "An unsupported claim was produced and must not be relied on",
+                "detail": violation,
+                "epistemic": "observed",
+                "evidence": [],
+            })
+    return {
+        "checked": True,
+        "violations": violations,
+        "violation_count": len(violations),
+        "note": ("A claim the matrix forbids was produced. It is recorded here and raised "
+                 "as a BLOCKER; do not rely on any conclusion in this run until the "
+                 "underlying code is fixed." if violations else
+                 "No unsupported claims were produced by this run."),
+    }
+
+
 def _epistemic_badge(finding: dict[str, Any]) -> str:
     """Render one finding's epistemic badge.
 
@@ -1375,6 +1409,10 @@ def finalize(run_dir: Path, report: dict[str, Any], redact_identifiers: bool = F
 
     if isinstance(report.get("findings"), list):
         label_findings(report["findings"])
+    # Enforce the claim matrix before anything is written: an unsupported claim must
+    # not be able to reach report.json or the HTML. The audit runs last because it
+    # checks the data the earlier stages produced.
+    report["claim_audit"] = _audit_claim_matrix(report)
     create_manifest(run_dir)
     write_json(run_dir / "report.json", report)
     build_html(run_dir, report, redact_identifiers=redact_identifiers)
