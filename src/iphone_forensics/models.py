@@ -72,6 +72,19 @@ class SubsystemCheck:
     next_test: str = ""
     requires_hands_on: bool = False
     evidence_paths: list[str] = field(default_factory=list)
+    # ------------------------------------------------- evidence trail (docs/v5/05)
+    # A measurement is only as good as the trail behind it. These fields bind every
+    # observation to its collector, its timestamp, its unit, its reasoning and its
+    # limits, so a reader can judge the value instead of having to trust it.
+    check_id: str = ""             # stable, e.g. "battery.cycle_count"
+    collector: str = ""            # which collector produced this observation
+    collected_at: str = ""         # UTC timestamp of the collection
+    normalized_value: Any = None   # value after unit conversion, may equal `measurement`
+    interpretation: str = ""       # what the value means, in plain words
+    thresholds: str = ""           # basis for any threshold, labeled heuristic vs documented
+    limitations: str = ""          # what this observation cannot establish
+    reasoning: str = ""            # how the interpretation was reached
+    previous_value: Any = None     # compare runs only; the earlier snapshot's value
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
