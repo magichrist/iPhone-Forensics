@@ -638,8 +638,11 @@ def test_advanced_help_documents_the_whole_engine_surface():
         cli._print_advanced_help()
     text = buffer.getvalue()
 
-    assert "Advanced engine interface" in text
-    assert "iphone-surgery" in text
+    assert "Advanced commands" in text
+    # One binary, one name: the retired `iphone-surgery` must not be advertised.
+    assert cli.PROGRAM in text
+    assert "iphone-surgery" not in text, \
+        f"the retired CLI name is still advertised:\n{text}"
     # Exit codes are documented for scripting.
     assert "Exit codes" in text
     for name, _help in cli._engine_subcommands():

@@ -888,11 +888,6 @@ def _integrity_section(report: dict[str, Any]) -> str:
         f"<p class='muted'>{esc(integrity.get('disclaimer', ''))}</p></section>")
 
 
-def _v4_sections(report: dict[str, Any]) -> str:
-    """Both v4-derived panels, in their v5 outline positions."""
-    return _hardware_section(report) + _integrity_section(report)
-
-
 def _redact_identifier(value: Any) -> str:
     """Mask an identifier. Delegates to the single util helper (docs/v5/07)."""
     return redact(value)

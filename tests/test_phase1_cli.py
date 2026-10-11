@@ -41,7 +41,12 @@ CLI_TIMEOUT_SECONDS = 120
 
 def _run_cli(*argv: str, cwd: Path | None = None, home: Path | None = None,
              path: str = OFFLINE_PATH) -> subprocess.CompletedProcess:
-    """Run the v4 CLI in a subprocess with a hermetic environment.
+    """Run the CLI in a subprocess with a hermetic environment.
+
+    Targets `iphone_forensics.cli` — the single documented binary. This used to
+    invoke `cli_v4` directly, back when that was a second console script; it now
+    forwards to `cli.main`, so testing the real entry point is both simpler and
+    more honest about what users actually run.
 
     ``stdin`` is closed so that an accidental ``input()`` surfaces as EOFError
     instead of hanging the suite — Phase 1 requires the welcome/config paths to be
@@ -53,7 +58,7 @@ def _run_cli(*argv: str, cwd: Path | None = None, home: Path | None = None,
     if home is not None:
         env["HOME"] = str(home)
     return subprocess.run(
-        [sys.executable, "-m", "iphone_forensics.cli_v4", *argv],
+        [sys.executable, "-m", "iphone_forensics.cli", *argv],
         capture_output=True, text=True, env=env, cwd=str(cwd or REPO_ROOT),
         stdin=subprocess.DEVNULL, timeout=CLI_TIMEOUT_SECONDS,
     )
@@ -170,11 +175,11 @@ def test_config_auto_load_or_template(tmp_path: Path):
 
 
 def test_config_cwd_autoload_honors_output_root(tmp_path: Path):
-    """`./iphone-surgery.json` should redirect `output_root` (Phase 1 task 2).
+    """`./iphone-surgery.json` redirects `output_root` (Phase 1 task 2).
 
-    Skipped while auto-load is unimplemented: the CLI currently exposes no
-    ``--config`` flag and never reads a CWD config, so the run lands in the
-    default ``~/Desktop/iphone-forensics`` location instead.
+    The config filename is retained from when this was the engine's own CLI; the
+    binary is now `iphone-forensics`, but renaming the file would silently ignore
+    every existing user's configuration.
     """
     home = _home_sandbox(tmp_path)
     cwd = tmp_path / "project"
@@ -199,9 +204,12 @@ def test_config_cwd_autoload_honors_output_root(tmp_path: Path):
     assert result.returncode in (EXIT_OK, EXIT_FINDINGS), result.stderr
     runs = [p for p in configured_root.glob("iphone-forensics-*") if p.is_dir()] \
         if configured_root.exists() else []
-    if not runs:
-        pytest.skip("auto-load of ./iphone-surgery.json is not implemented yet "
-                    "(no --config flag, no CWD config discovery in cli_v4)")
+    # No fallback skip: `--config` and CWD auto-load both exist (cli_v4.load_config),
+    # so a missing run directory is a real failure and must fail the test. The old
+    # skip here claimed the feature was unimplemented, so the test could never fail.
+    assert runs, (f"config output_root was ignored; run landed in "
+                  f"{sorted(p.name for p in cwd.iterdir())}\n"
+                  f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}")
 
     run_dir = runs[0]
     report = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))

@@ -28,25 +28,6 @@ EVIDENCE_DIR_NAME = "evidence"
 # run stays analyzable.
 LEGACY_EVIDENCE_DIR_NAME = "raw"
 
-# Versions this build still reads. v5 changed the collection-status vocabulary
-# and the run-directory layout, but a v3/v4 run directory must remain loadable so
-# an older `report.json` can still be compared against a current run.
-SUPPORTED_READ_VERSIONS = ("3.x", "4.x", "5.x")
-
-
-def is_supported_version(version: Any) -> bool:
-    """True when *version* is one this build knows how to read.
-
-    Accepts a major version or a full string ('4.0.0', '4', '5.0.0'). Anything
-    unparseable is rejected rather than guessed at.
-    """
-    try:
-        major = int(str(version).strip().split(".")[0])
-    except (TypeError, ValueError, IndexError):
-        return False
-    return f"{major}.x" in SUPPORTED_READ_VERSIONS
-
-
 def build_manifest(run_dir: Path) -> dict[str, Any]:
     """Hash every collected artifact (excluding reports/manifests themselves).
 

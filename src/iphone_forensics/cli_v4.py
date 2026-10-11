@@ -258,43 +258,11 @@ def _device_count_summary(tools_available: bool) -> str:
     return f"{len(devices)} detected (UDIDs redacted here; report files keep full values)"
 
 
-def cmd_welcome(args: argparse.Namespace) -> int:
-    """No-subcommand welcome: version, toolchain, devices, prerequisites, next step.
 
-    Non-interactive by default and automation-safe: no prompt is shown unless
-    --interactive is passed AND stdin is a TTY. Always exits 0.
-    """
-    print(f"iphone-forensics v{__version__} — hardware-first iPhone diagnostics, "
-          "integrity assessment, buyer & repair workflows")
-    print()
-    lbd_count = sum(1 for name in LIB_TOOLS if shutil.which(name))
-    pmd = shutil.which("pymobiledevice3")
-    mvt = shutil.which("mvt-ios")
-    pmd_state = "installed" if pmd else "not installed (optional)"
-    mvt_state = "installed" if mvt else "not installed (optional)"
-    print(f"Toolchain:     libimobiledevice {lbd_count}/{len(LIB_TOOLS)} tools found")
-    print(f"                 pymobiledevice3: {pmd_state}; mvt-ios: {mvt_state}")
-    mode = ("full device support" if lbd_count else
-            "pymobiledevice3 only" if pmd else "offline analysis only")
-    print(f"Operational mode: {mode}")
-    print(f"Devices:          {_device_count_summary(bool(lbd_count or pmd))}")
-    print("Prerequisites:    iPhone unlocked · Trust This Computer approved · data-capable cable.")
-    print()
-    print("Next actions:")
-    print("  iphone-forensics doctor                       toolchain, pairing, reachability check")
-    print("  iphone-forensics inspect --backup-dir <dir>   offline analysis of a backup (no device)")
-    print("  iphone-forensics capabilities                 what software can and cannot verify")
-    print("  iphone-forensics --help                       all 16 subcommands")
-    # Only prompt when explicitly requested on a real terminal; scripts (stdin
-    # closed or piped) always fall through to EXIT_OK without reading stdin.
-    if getattr(args, "interactive", False) and sys.stdin.isatty():
-        try:
-            answer = input("\nRun `iphone-forensics doctor` now? [y/N]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            answer = ""
-        if answer in {"y", "yes", "d", "doctor"}:
-            return cmd_doctor(args)
-    return EXIT_OK
+
+
+# The no-subcommand welcome is `cli._welcome`: with the two CLIs merged there is
+# exactly one binary and exactly one welcome screen.
 
 
 # ---------------------------------------------------------------- commands

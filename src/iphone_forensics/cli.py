@@ -239,27 +239,7 @@ def _ask_device_and_consent(devices: list[str],
     return devices[chosen_index - 1], granted
 
 
-def _select_device(devices: list[str]) -> str | None:
-    """Numbered selector for a terminal session. None = cancelled or invalid.
 
-    Retained for callers that need to ask about the device alone; `inspect` uses
-    :func:`_ask_device_and_consent` so a session is only interrupted once.
-    """
-    print(f"\n{len(devices)} devices detected. Which one should be inspected?")
-    for index, udid in enumerate(devices, 1):
-        print(f"  {index}. {redact(udid)}")
-    print("  (the full UDID is written to the run's report.json)")
-    try:
-        answer = input(f"Choose 1-{len(devices)} [1]: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return None
-    if not answer:
-        return devices[0]
-    if answer.isdigit() and 1 <= int(answer) <= len(devices):
-        return devices[int(answer) - 1]
-    print(f"Not a choice between 1 and {len(devices)}.")
-    return None
 
 
 # ------------------------------------------------------------------- consent
@@ -785,27 +765,39 @@ def main(argv: list[str] | None = None) -> int:
         return _print_advanced_help()
 
     command = _flag_value(args, "command")
-    if command in COMMANDS:
-        return args.func(args)
+
+    # Whether the operator actually typed a legacy flag must be decided *before*
+    # the config layer runs: `_apply_config` writes defaults such as `output` onto
+    # the namespace, and reading the namespace afterwards made a bare `iphone-forensics`
+    # look like a legacy invocation, so it ran a full inspection instead of the
+    # welcome screen.
+    legacy_flags_given = any(_given(args, dest) is not None for dest in COMPAT_DESTS)
+
+    # The config layer runs for every command on this binary, not just the
+    # engine's. `./iphone-surgery.json` and `--config` are documented as global,
+    # and after the two CLIs were merged a facade command (`inspect`) would
+    # otherwise be the one place `output_root` was silently ignored.
+    config_error = _apply_effective_config(args)
+    if config_error is not None:
+        return config_error
+
     if command is not None:
-        # An advanced command mounted from the engine (integrity, case, buyer,
-        # evidence-verify, …). It carries its own `func`, and the engine's config
-        # layer has to run first so `--config` and ./iphone-surgery.json apply.
-        return _run_advanced(args)
-    if not any(_given(args, dest) is not None for dest in COMPAT_DESTS):
+        # Either a facade command or an advanced one mounted from the engine
+        # (integrity, case, buyer, evidence-verify, …); both carry their own `func`.
+        return args.func(args)
+    if not legacy_flags_given:
         return _welcome()
     # No command, but legacy flags were passed: perform the same inspection the
     # pre-v5 CLI always performed (this is also the `iphone_audit.py` path).
     return _run_inspect_command(args)
 
 
-def _run_advanced(args: argparse.Namespace) -> int:
-    """Dispatch an engine subcommand through the engine's config layer.
+def _apply_effective_config(args: argparse.Namespace) -> int | None:
+    """Load and apply configuration. Returns an exit code on failure, else None.
 
-    These commands used to be reached only via `iphone-surgery`, whose `main`
-    loaded `./iphone-surgery.json` and applied it before dispatch. Now that they
-    share one binary they must still get that treatment, or `--config` would be
-    silently ignored for exactly the commands that document it.
+    Wraps the engine's loader, which used to be called only by `cli_v4.main`.
+    The `config` subcommand manages files directly and must never auto-load —
+    that is what keeps a broken config file repairable via `config --out --force`.
     """
     from .cli_v4 import EXIT_CONFIG, ConfigError, _apply_config, default_config, load_config
 
@@ -822,7 +814,7 @@ def _run_advanced(args: argparse.Namespace) -> int:
     _apply_config(args, config, sources)
     if sources and not getattr(args, "quiet", False):
         print("config: using " + ", ".join(str(path) for path in sources), file=sys.stderr)
-    return args.func(args)
+    return None
 
 
 def _run_mvt_backup(backup_path: str, run_dir: Path, raw: Path, report: dict[str, Any]) -> None:

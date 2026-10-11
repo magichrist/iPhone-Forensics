@@ -96,6 +96,35 @@ def test_compare_accepts_both_positional_and_flag_form():
     assert flagged.previous_flag == "a.json"
 
 
+def test_bare_invocation_shows_the_welcome_screen(monkeypatch, capsys):
+    """No command and no legacy flag must not start an inspection.
+
+    Regression: the config layer writes `output` onto the namespace, and the
+    dispatch read the namespace *after* applying config to decide whether legacy
+    flags were passed. A bare `iphone-forensics` therefore looked like a legacy
+    invocation and ran a full inspection against no device.
+    """
+    monkeypatch.setattr(cli, "cmd_inspect",
+                        lambda args: (_ for _ in ()).throw(
+                            AssertionError("bare invocation must not inspect")))
+    monkeypatch.setattr(cli, "_run_inspect_command",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("bare invocation must not inspect")))
+    assert cli.main([]) == 0
+    assert "iphone-forensics" in capsys.readouterr().out
+
+
+def test_config_defaults_do_not_count_as_legacy_flags(monkeypatch):
+    """The 'were legacy flags passed?' decision must precede config loading."""
+    seen: list[bool] = []
+    monkeypatch.setattr(cli, "_apply_effective_config",
+                        lambda args: seen.append(
+                            any(cli._given(args, d) is not None for d in cli.COMPAT_DESTS)) or None)
+    monkeypatch.setattr(cli, "_welcome", lambda: 0)
+    cli.main([])
+    assert seen == [False], "config-supplied defaults were mistaken for user flags"
+
+
 def test_both_compare_forms_reach_the_engine(tmp_path, monkeypatch):
     """End-to-end through dispatch, not just parsing."""
     previous = tmp_path / "a.json"
