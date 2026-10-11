@@ -178,10 +178,12 @@ def test_report_json_records_schema_version(tmp_path: Path):
     import argparse
     args = argparse.Namespace(redact=False, compare_json=None)
     report = _new_report(args)
-    assert report["schema_version"] == "4.0.0"
+    assert report["schema_version"] == "5.0.0"
     _finish_run(run, report, {"checks": {}}, args)
     persisted = json.loads((run / "report.json").read_text())
-    assert persisted["schema_version"] == "4.0.0"
+    assert persisted["schema_version"] == "5.0.0"
+    # v5 writes the run README; a finished run must never ship without it.
+    assert (run / "README.txt").is_file()
 
 
 def test_integrity_engine_reads_v3_report_without_schema_version(tmp_path: Path):

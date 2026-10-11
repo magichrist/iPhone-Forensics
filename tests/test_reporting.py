@@ -48,5 +48,5 @@ def test_html_has_storage_normalization_and_comparison_section(tmp_path: Path):
     build_html(tmp_path, report)
     output = (tmp_path / "report.html").read_text()
     assert "128.00 GB" in output
-    assert "Comparison with previous inspection" in output
+    assert "Change since the previous inspection" in output
     assert "ProductVersion" in output

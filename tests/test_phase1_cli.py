@@ -68,7 +68,7 @@ def _home_sandbox(tmp_path: Path) -> Path:
 
 
 def _only_run_dir(output_root: Path) -> Path:
-    runs = sorted(p for p in output_root.glob("iphone-audit-*") if p.is_dir())
+    runs = sorted(p for p in output_root.glob("iphone-forensics-*") if p.is_dir())
     assert len(runs) == 1, f"expected exactly one run directory, got {runs}"
     return runs[0]
 
@@ -107,7 +107,7 @@ def test_inspect_backup_dir_offline(tmp_path: Path):
     assert report_path.exists(), f"report.json missing; run contains {sorted(p.name for p in run_dir.iterdir())}"
     report = json.loads(report_path.read_text(encoding="utf-8"))
 
-    assert report["schema_version"] == "4.0.0"
+    assert report["schema_version"] == "5.0.0"
     assert report["version"] == __version__
     assert report["finished_at"], "finished_at must be set by finalize()"
 
@@ -118,9 +118,9 @@ def test_inspect_backup_dir_offline(tmp_path: Path):
     assert (run_dir / "manifest.json").exists(), "manifest.json is the chain-of-custody record"
 
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == "4.0.0"
+    assert manifest["schema_version"] == "5.0.0"
     hashed = {entry["path"] for entry in manifest["artifacts"]}
-    assert any(path.startswith("raw/offline-evidence/") for path in hashed), (
+    assert any(path.startswith("evidence/offline-evidence/") for path in hashed), (
         f"supplied artifacts must be copied into evidence, manifest holds {sorted(hashed)}")
 
 
@@ -197,7 +197,7 @@ def test_config_cwd_autoload_honors_output_root(tmp_path: Path):
     result = _run_cli("inspect", "--backup-dir", str(backup), cwd=cwd, home=home)
 
     assert result.returncode in (EXIT_OK, EXIT_FINDINGS), result.stderr
-    runs = [p for p in configured_root.glob("iphone-audit-*") if p.is_dir()] \
+    runs = [p for p in configured_root.glob("iphone-forensics-*") if p.is_dir()] \
         if configured_root.exists() else []
     if not runs:
         pytest.skip("auto-load of ./iphone-surgery.json is not implemented yet "
@@ -205,7 +205,7 @@ def test_config_cwd_autoload_honors_output_root(tmp_path: Path):
 
     run_dir = runs[0]
     report = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
-    assert report["schema_version"] == "4.0.0"
+    assert report["schema_version"] == "5.0.0"
     assert (run_dir / "manifest.json").exists()
 
 

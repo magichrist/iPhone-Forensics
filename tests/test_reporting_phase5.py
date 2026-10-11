@@ -2,7 +2,7 @@
 
 Covers:
   1. Partial-collection honesty banner (a partial run must never read as healthy).
-  2. The "Unknown / unavailable / unsupported / skipped tests" panel, rendered
+  2. The "Unknown, unavailable, unsupported and skipped tests" panel, rendered
      from `capabilities.get_matrix()` with counts matching `coverage_counts()`.
   3. The 15-section HTML outline mapped against spec §12.
   4. Missing != 0/false — absent telemetry is never coerced into a value.
@@ -75,9 +75,12 @@ def test_report_renders_all_fifteen_spec_sections_in_order(tmp_path: Path):
 
 
 def test_section_titles_cover_executive_summary_through_next_steps():
+    """v5 §4C outline: exactly the 11 required sections, in order."""
     assert SECTION_TITLES[0] == "Executive summary"
-    assert SECTION_TITLES[-1].endswith("next steps")
-    assert len(SECTION_TITLES) == 15
+    assert SECTION_TITLES[-1] == "Technical appendix"
+    assert len(SECTION_TITLES) == 11
+    assert "Battery and power" in SECTION_TITLES
+    assert "Risks, findings and actions" in SECTION_TITLES
 
 
 # --------------------------------------------------------- partial-collection banner
@@ -112,7 +115,7 @@ def test_banner_shown_when_assessment_status_is_incomplete(tmp_path: Path):
                                  "identity_fields_expected": 4})
     html = _html(tmp_path, report)
     assert "<section class='panel banner-incomplete'" in html
-    assert "Device identity (reported by iOS)" in html
+    assert "Device identity and configuration" in html
 
 
 def test_banner_does_not_look_like_a_healthy_verdict(tmp_path: Path):
@@ -144,7 +147,7 @@ def test_banner_escapes_untrusted_collector_names(tmp_path: Path):
 
 def test_unknown_panel_renders_counts_matching_coverage_counts(tmp_path: Path):
     html = _html(tmp_path, _report())
-    assert "Unknown / unavailable / unsupported / skipped tests" in html
+    assert "Unknown, unavailable, unsupported and skipped tests" in html
     counts = coverage_counts()
     for level in COVERAGE_LEVELS:
         # Counts are rendered as "<b>level</b>: N" inside a list item.
@@ -180,7 +183,7 @@ def test_unknown_panel_lists_failed_collectors_as_skipped(tmp_path: Path):
 
 def test_unknown_panel_empty_state_when_all_collectors_succeeded(tmp_path: Path):
     html = _html(tmp_path, _report())
-    assert "Every collector completed or ended as an expected stream boundary" in html
+    assert "Every collector produced usable evidence" in html
 
 
 # ------------------------------------------------------ missing != 0 / missing != false
@@ -205,9 +208,9 @@ def test_missing_collection_telemetry_renders_not_provided(tmp_path: Path):
     """A collector with no recorded exit code/bytes is unknown, not 0."""
     report = _report(collection=[{"name": "mystery-collector", "status": "failed_or_partial"}])
     html = _html(tmp_path, report)
-    # Anchor inside the "13. Collection coverage" table, not the banner (which also
+    # Anchor inside the "10. Evidence and coverage" table, not the banner (which also
     # names the failed collector).
-    coverage_start = html.index("13. Collection coverage")
+    coverage_start = html.index("10. Evidence and coverage")
     row_start = html.index("mystery-collector", coverage_start)
     row = html[row_start:html.index("</tr>", row_start)]
     assert MISSING in row
@@ -217,7 +220,7 @@ def test_missing_collection_telemetry_renders_not_provided(tmp_path: Path):
 def test_missing_crash_triage_counts_are_not_rendered_as_zero(tmp_path: Path):
     report = _report(crash_triage={"interpretation": "Triage ran."})
     html = _html(tmp_path, report)
-    triage_start = html.index("10. Crash and panic triage")
+    triage_start = html.index("Crash and panic triage")
     line = html[triage_start:html.index("</p>", html.index("Files scanned", triage_start))]
     assert "Files scanned: not provided" in line
 
@@ -281,7 +284,7 @@ def test_redacted_exports_still_mask_identifiers(tmp_path: Path):
         assert UDID not in text, f"{name} leaked UDID"
     # The unknown panel must still render in the redacted HTML export.
     redacted_html = (tmp_path / "report-redacted.html").read_text(encoding="utf-8")
-    assert "Unknown / unavailable / unsupported / skipped tests" in redacted_html
+    assert "Unknown, unavailable, unsupported and skipped tests" in redacted_html
     assert "Can never be established in software" in redacted_html
 
 
