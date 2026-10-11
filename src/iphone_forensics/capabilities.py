@@ -463,3 +463,110 @@ def fallback_for(claim: str) -> str:
         if row["claim"] == claim:
             return row["otherwise"]
     return "unknown: not claimable with this toolchain."
+
+
+# ----------------------------------------------------------------- claim gates
+# The matrix above is a policy; this function is the enforcement. It inspects the
+# *structured data* of a finished report and returns a violation for every claim
+# the tool made without the evidence the matrix requires.
+#
+# Deliberately narrow: it checks the handful of claims that a caller could get
+# wrong from inside this codebase, rather than pattern-matching English prose.
+# The rendered HTML is never scanned, because the report's own Technical appendix
+# legitimately quotes each forbidden claim in order to prohibit it.
+
+# (regex, claim) — an affirmative assertion of something the matrix forbids.
+_FORBIDDEN_ASSERTIONS: tuple[tuple[str, str], ...] = (
+    (r"\bmalware[- ]free\b", "malware_free"),
+    (r"\bno malware\b", "malware_free"),
+    (r"\bnever tampered\b", "never_tampered"),
+    (r"\bface ?id (?:is|are) (?:verified|working|healthy)\b", "faceid_display_sensor_healthy"),
+    (r"\b(?:display|sensors?) (?:is|are) (?:verified|working|healthy)\b",
+     "faceid_display_sensor_healthy"),
+)
+
+
+def _texts(value: Any) -> list[str]:
+    """Every string inside a nested report structure, flattened."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        out: list[str] = []
+        for item in value.values():
+            out.extend(_texts(item))
+        return out
+    if isinstance(value, (list, tuple)):
+        out = []
+        for item in value:
+            out.extend(_texts(item))
+        return out
+    return []
+
+
+def audit_report(report: dict[str, Any]) -> list[str]:
+    """Enforce the claim matrix against a finished report.
+
+    Returns a human-readable violation per unsupported claim, empty when the report
+    only states things it has evidence for. Run before the report is written, so an
+    unsupported claim cannot reach the file on disk.
+    """
+    violations: list[str] = []
+
+    for pattern, claim in _FORBIDDEN_ASSERTIONS:
+        for text in _texts(report):
+            if re.search(pattern, text, re.I):
+                violations.append(
+                    f"{claim}: forbidden assertion {pattern!r} found in report data "
+                    f"-> {fallback_for(claim)}")
+                break  # one violation per claim is enough to act on
+
+    # A battery metric is only claimable when its unit is recorded. A bare number
+    # is exactly the unlabelled value the matrix says to refuse.
+    hardware = report.get("hardware_assessment")
+    if isinstance(hardware, dict):
+        for check in hardware.get("checks") or []:
+            if not isinstance(check, dict):
+                continue
+            if str(check.get("subsystem", "")).lower() != "battery":
+                continue
+            if check.get("status") in {"not_tested", "unsupported"}:
+                continue
+            if not str(check.get("unit") or "").strip():
+                violations.append(
+                    "battery_metric: a battery value is asserted without a unit "
+                    f"(question={check.get('question')!r}) -> {fallback_for('battery_metric')}")
+
+    # A replacement claim must trace back to a supported diagnostic source. Anything
+    # else is a metadata difference wearing a repair verdict.
+    integrity = report.get("integrity_assessment")
+    if isinstance(integrity, dict):
+        for field_name, classification in (integrity.get("classifications") or {}).items():
+            if str(classification).strip().lower() != "replacement_indicated":
+                continue
+            sources = [str(entry.get("source", "")) for entry in integrity.get("changes", [])
+                       if isinstance(entry, dict)]
+            if not any(source.lower().replace(" ", "_") in SUPPORTED_REPLACEMENT_SOURCES
+                       for source in sources):
+                violations.append(
+                    f"component_replaced: {field_name} claims replacement without a "
+                    f"supported diagnostic source -> {fallback_for('component_replaced')}")
+
+    # Continuity is a property of a physical device, not of two matching snapshots.
+    continuity = str((integrity or {}).get("continuity") or "").strip().lower()
+    if continuity == "established" and not _has_hardware_bound_identifier(report):
+        violations.append(
+            "never_tampered: continuity asserted without a hardware-bound identifier "
+            f"-> {fallback_for('never_tampered')}")
+
+    return violations
+
+
+def _has_hardware_bound_identifier(report: dict[str, Any]) -> bool:
+    """True when the report carries an identifier that cannot be changed in software.
+
+    A serial number read from the device is hardware-bound; a snapshot that merely
+    repeats a value is not.
+    """
+    device = report.get("device") if isinstance(report.get("device"), dict) else {}
+    serial = str(device.get("SerialNumber") or "").strip()
+    return bool(serial) and len(serial) >= 6
