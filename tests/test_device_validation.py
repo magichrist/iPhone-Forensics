@@ -7,6 +7,7 @@ when a device is actually connected.
 Offline by default: no test in this file runs a subprocess or touches a device
 unless the opt-in is set.
 """
+
 from __future__ import annotations
 
 import json
@@ -30,7 +31,9 @@ def _device_attached() -> bool:
     if not tool:
         return False
     try:
-        result = subprocess.run([tool, "-l"], capture_output=True, text=True, timeout=15, check=False)
+        result = subprocess.run(
+            [tool, "-l"], capture_output=True, text=True, timeout=15, check=False
+        )
     except (OSError, subprocess.TimeoutExpired):
         return False
     return any(line.strip() for line in result.stdout.splitlines() if line.strip())
@@ -86,8 +89,9 @@ def test_compare_discovers_the_run_it_just_made(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     run_dir = tmp_path / "iphone-forensics-20260101-120000"
     (run_dir / "evidence").mkdir(parents=True)
-    (run_dir / "report.json").write_text(json.dumps({
-        "schema_version": "5.0.0", "device": {}, "collection": [], "findings": []}))
+    (run_dir / "report.json").write_text(
+        json.dumps({"schema_version": "5.0.0", "device": {}, "collection": [], "findings": []})
+    )
     found = cli._default_current_report()
     assert found is not None
     assert found.parent == run_dir
@@ -97,5 +101,6 @@ def test_skip_reason_is_clear_when_no_device():
     """The skip must explain how to opt in, not just say 'skipped'."""
     if RUN_THESE:
         pytest.skip("device tests are enabled; nothing to assert")
-    assert _OPT_IN in requires_device.kwargs.get("reason", ""), \
+    assert _OPT_IN in requires_device.kwargs.get("reason", ""), (
         "the skip reason must name the opt-in variable"
+    )

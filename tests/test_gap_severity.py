@@ -8,6 +8,7 @@ an optional tool exit nonzero with a list of things to investigate.
 These tests pin the distinction the README promises: only a check that ran and
 returned something negative is a finding about the device.
 """
+
 from __future__ import annotations
 
 from iphone_forensics.analysis import _GAP_SEVERITY, derive_findings
@@ -28,6 +29,7 @@ def _by_title(findings, needle):
 
 
 # --------------------------------------------- environment gaps are not faults
+
 
 def test_missing_tool_is_info_not_review():
     """A missing optional tool is an environment gap about this machine."""
@@ -66,6 +68,7 @@ def test_unsupported_and_not_applicable_are_info():
 
 # ------------------------------------- a real negative result still gets REVIEW
 
+
 def test_failed_status_stays_review():
     """The check ran and returned a negative: that IS a finding about the device."""
     findings = _findings([{"name": "diagnostics-GasGauge", "status": "failed"}])
@@ -79,11 +82,13 @@ def test_inconclusive_status_stays_review():
 
 def test_every_gap_status_has_a_severity():
     from iphone_forensics.analysis import _GAP_DETAIL
+
     for status in _GAP_DETAIL:
         assert status in _GAP_SEVERITY, f"{status} has wording but no severity"
 
 
 # ------------------------------------------------ manual checks are not defects
+
 
 def test_unverified_buyer_checks_are_info_not_review():
     """Activation Lock etc. need a human; the tool never claimed to check them."""
@@ -105,6 +110,7 @@ def test_buyer_critical_failure_stays_blocker():
 
 # ------------------------------------------------------------- clean run shape
 
+
 def test_a_clean_run_produces_no_review_or_blocker_findings():
     """A fully collected device with nothing wrong must not fail the exit code.
 
@@ -112,14 +118,17 @@ def test_a_clean_run_produces_no_review_or_blocker_findings():
     1 with seven REVIEW findings, all of them gaps about the host or checks the
     tool never performs.
     """
-    findings = _findings([
-        {"name": "device-info-xml", "status": "collected"},
-        {"name": "diagnostics-GasGauge", "status": "collected"},
-        {"name": "installed-apps-pymobiledevice3", "status": "collection_error"},
-    ])
+    findings = _findings(
+        [
+            {"name": "device-info-xml", "status": "collected"},
+            {"name": "diagnostics-GasGauge", "status": "collected"},
+            {"name": "installed-apps-pymobiledevice3", "status": "collection_error"},
+        ]
+    )
     manual = _by_title(findings, "not verified")
-    assert manual and all(f["severity"] == "INFO" for f in manual), \
+    assert manual and all(f["severity"] == "INFO" for f in manual), (
         "manual checks are informational, not defects"
+    )
     severities = {f["severity"] for f in findings}
     assert "REVIEW" not in severities, severities
     assert "BLOCKER" not in severities, severities

@@ -11,6 +11,7 @@ Covers docs/v5/05-evidence-analysis-model.md:
   * legacy reader aliases exported from util agree with models.normalize_status
   * nothing in the status layer raises on odd input
 """
+
 import sys
 from pathlib import Path
 
@@ -39,6 +40,7 @@ POSIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="POSIX subproces
 
 # ------------------------------------------------------------- returncode 0 -> collected
 
+
 def test_success_exit_maps_to_collected(tmp_path: Path):
     collection: list[dict] = []
     save_result(tmp_path, collection, "echo-ok", [sys.executable, "-c", "print('ok')"], 15)
@@ -52,9 +54,12 @@ def test_success_exit_maps_to_collected(tmp_path: Path):
 
 # ----------------------------------------------------------- nonzero exit -> collection_error
 
+
 def test_nonzero_exit_maps_to_collection_error(tmp_path: Path):
     collection: list[dict] = []
-    save_result(tmp_path, collection, "always-fails", [sys.executable, "-c", "raise SystemExit(3)"], 15)
+    save_result(
+        tmp_path, collection, "always-fails", [sys.executable, "-c", "raise SystemExit(3)"], 15
+    )
     entry = collection[0]
     assert entry["status"] == "collection_error"
     assert entry["returncode"] == 3
@@ -63,6 +68,7 @@ def test_nonzero_exit_maps_to_collection_error(tmp_path: Path):
 
 
 # -------------------------------------------------------------- missing binary -> tool_missing
+
 
 def test_missing_binary_maps_to_tool_missing(tmp_path: Path):
     collection: list[dict] = []
@@ -75,17 +81,25 @@ def test_missing_binary_maps_to_tool_missing(tmp_path: Path):
 
 
 def test_missing_binary_via_write_command_result_directly(tmp_path: Path):
-    meta = write_command_result(tmp_path, "direct-missing",
-                                run_command(["definitely-not-a-real-binary-xyz"], timeout=3))
+    meta = write_command_result(
+        tmp_path, "direct-missing", run_command(["definitely-not-a-real-binary-xyz"], timeout=3)
+    )
     assert meta["status"] == "tool_missing"
 
 
 # --------------------------------------------------------------------- timeout -> collection_error
 
+
 @POSIX_ONLY
 def test_timeout_maps_to_collection_error_and_keeps_timed_out(tmp_path: Path):
     collection: list[dict] = []
-    save_result(tmp_path, collection, "slow-command", [sys.executable, "-c", "import time; time.sleep(5)"], 1)
+    save_result(
+        tmp_path,
+        collection,
+        "slow-command",
+        [sys.executable, "-c", "import time; time.sleep(5)"],
+        1,
+    )
     entry = collection[0]
     assert entry["status"] == "collection_error"
     assert entry["timed_out"] is True
@@ -95,12 +109,19 @@ def test_timeout_maps_to_collection_error_and_keeps_timed_out(tmp_path: Path):
 
 # --------------------------------------- bounded-log expected stream end stays collected (non-failure)
 
+
 @POSIX_ONLY
 def test_bounded_stream_end_is_collected_with_note(tmp_path: Path):
     out = tmp_path / "stream.bin"
-    result = capture_stream([sys.executable, "-c",
-                             "import sys, time; sys.stdout.write('line\\n'); sys.stdout.flush(); time.sleep(30)"],
-                            1, out)
+    result = capture_stream(
+        [
+            sys.executable,
+            "-c",
+            "import sys, time; sys.stdout.write('line\\n'); sys.stdout.flush(); time.sleep(30)",
+        ],
+        1,
+        out,
+    )
     assert result["timed_out"] is True
     assert result["expected_stream_end"] is True
     meta = write_command_result(tmp_path, "stream", result)
@@ -111,11 +132,18 @@ def test_bounded_stream_end_is_collected_with_note(tmp_path: Path):
 
 # --------------------------------------------------------------------------- skip flag
 
+
 def test_skip_records_skipped_by_user_and_never_runs(tmp_path: Path):
     sentinel = tmp_path / "was-executed"
     collection: list[dict] = []
-    result = save_result(tmp_path, collection, "declined-op", [sys.executable, "-c",
-                         f"open({str(sentinel)!r}, 'w').close()"], 15, skip=True)
+    result = save_result(
+        tmp_path,
+        collection,
+        "declined-op",
+        [sys.executable, "-c", f"open({str(sentinel)!r}, 'w').close()"],
+        15,
+        skip=True,
+    )
     assert collection[0]["status"] == "skipped_by_user"
     assert collection[0]["returncode"] is None
     assert not sentinel.exists()  # nothing was spawned
@@ -124,28 +152,55 @@ def test_skip_records_skipped_by_user_and_never_runs(tmp_path: Path):
 
 # ------------------------------------------------- permission_denied (conservative marker match)
 
+
 def test_denial_marker_on_errored_run_maps_to_permission_denied(tmp_path: Path, monkeypatch):
     def fake_run(command, timeout=45):
-        return {"command": command, "returncode": 255, "stdout": b"",
-                "stderr": b"ERROR: Pairing dialog or PIN was denied by the user",
-                "duration_seconds": 0.1, "timed_out": False}
+        return {
+            "command": command,
+            "returncode": 255,
+            "stdout": b"",
+            "stderr": b"ERROR: Pairing dialog or PIN was denied by the user",
+            "duration_seconds": 0.1,
+            "timed_out": False,
+        }
+
     monkeypatch.setattr("iphone_forensics.collectors.run_command", fake_run)
     collection: list[dict] = []
-    save_result(tmp_path, collection, "pairing-validation", ["idevicepair", "validate"], 20,
-                denial_markers=PAIRING_DENIAL_MARKERS)
+    save_result(
+        tmp_path,
+        collection,
+        "pairing-validation",
+        ["idevicepair", "validate"],
+        20,
+        denial_markers=PAIRING_DENIAL_MARKERS,
+    )
     assert collection[0]["status"] == "permission_denied"
     assert collection[0]["status_detail"]
 
 
 def test_denial_marker_on_healthy_run_stays_collected(tmp_path: Path, monkeypatch):
     """Conservative guard: a successful run that merely mentions 'denied' is not a denial."""
+
     def fake_run(command, timeout=45):
-        return {"command": command, "returncode": 0, "stdout": b"SUCCESS: pairing validated (no access denied)",
-                "stderr": b"", "duration_seconds": 0.1, "timed_out": False}
+        return {
+            "command": command,
+            "returncode": 0,
+            "stdout": b"SUCCESS: pairing validated (no access denied)",
+            "stderr": b"",
+            "duration_seconds": 0.1,
+            "timed_out": False,
+        }
+
     monkeypatch.setattr("iphone_forensics.collectors.run_command", fake_run)
     collection: list[dict] = []
-    save_result(tmp_path, collection, "pairing-validation", ["idevicepair", "validate"], 20,
-                denial_markers=PAIRING_DENIAL_MARKERS)
+    save_result(
+        tmp_path,
+        collection,
+        "pairing-validation",
+        ["idevicepair", "validate"],
+        20,
+        denial_markers=PAIRING_DENIAL_MARKERS,
+    )
     assert collection[0]["status"] == "collected"
 
 
@@ -154,6 +209,7 @@ def test_denial_markers_are_lowercase_and_conservative():
 
 
 # ------------------------------------------------------ discovery without any tool records tool_missing
+
 
 def test_discover_devices_without_tools_records_tool_missing(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("iphone_forensics.collectors.shutil.which", lambda name: None)
@@ -166,6 +222,7 @@ def test_discover_devices_without_tools_records_tool_missing(tmp_path: Path, mon
 
 
 # --------------------------------------------------------------- vocabulary + roll-up guarantees
+
 
 def test_all_emitted_statuses_are_in_collection_statuses(tmp_path: Path):
     """Round-trip: whatever the layer emits is a valid, idempotent status."""
@@ -183,7 +240,13 @@ def test_all_emitted_statuses_are_in_collection_statuses(tmp_path: Path):
 
 def test_status_to_health_rollup_for_emitted_statuses():
     """Summary roll-up: emitted statuses map onto declared health statuses."""
-    emitted = ("collected", "collection_error", "tool_missing", "permission_denied", "skipped_by_user")
+    emitted = (
+        "collected",
+        "collection_error",
+        "tool_missing",
+        "permission_denied",
+        "skipped_by_user",
+    )
     for status in emitted:
         assert status in STATUS_TO_HEALTH, status
         assert STATUS_TO_HEALTH[status] in HEALTH_STATUSES
@@ -195,7 +258,10 @@ def test_status_to_health_rollup_for_emitted_statuses():
 def test_status_aliases_for_readers_match_models():
     """util.STATUS_ALIASES_FOR_READERS must stay in lockstep with models.normalize_status."""
     assert STATUS_ALIASES_FOR_READERS == {
-        "success": "collected", "expected_end": "collected", "failed_or_partial": "collection_error"}
+        "success": "collected",
+        "expected_end": "collected",
+        "failed_or_partial": "collection_error",
+    }
     for legacy, expected in STATUS_ALIASES_FOR_READERS.items():
         assert normalize_status(legacy) == expected
 
@@ -213,6 +279,7 @@ def test_legacy_strings_are_never_emitted(tmp_path: Path):
 
 # ------------------------------------------------------------------------ never-raise guarantees
 
+
 def test_write_command_result_never_raises_on_odd_results(tmp_path: Path):
     odd_results = [
         {},  # entirely empty
@@ -227,9 +294,13 @@ def test_write_command_result_never_raises_on_odd_results(tmp_path: Path):
 
 
 def test_write_command_result_override_paths(tmp_path: Path):
-    meta = write_command_result(tmp_path, "override", {"returncode": 1},
-                                status_override="skipped_by_user",
-                                status_detail_override="operator declined")
+    meta = write_command_result(
+        tmp_path,
+        "override",
+        {"returncode": 1},
+        status_override="skipped_by_user",
+        status_detail_override="operator declined",
+    )
     assert meta["status"] == "skipped_by_user"
     assert meta["status_detail"] == "operator declined"
 
@@ -248,8 +319,18 @@ def test_skip_keeps_existing_result_keys(tmp_path: Path):
     collection: list[dict] = []
     save_result(tmp_path, collection, "skipped-op", ["whatever"], 1, skip=True)
     entry = collection[0]
-    for key in ("name", "command", "returncode", "duration_seconds", "timed_out",
-                "expected_stream_end", "stdout_file", "stderr_file",
-                "stdout_bytes", "stderr_bytes", "status"):
+    for key in (
+        "name",
+        "command",
+        "returncode",
+        "duration_seconds",
+        "timed_out",
+        "expected_stream_end",
+        "stdout_file",
+        "stderr_file",
+        "stdout_bytes",
+        "stderr_bytes",
+        "status",
+    ):
         assert key in entry
     assert "status_detail" in entry

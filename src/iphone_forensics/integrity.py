@@ -35,6 +35,7 @@ Phase-3 hardening implemented here:
   diagnostic service, technician-verified evidence), so no metadata diff can
   ever produce a part-swap claim.
 """
+
 from __future__ import annotations
 
 import re
@@ -45,9 +46,18 @@ from .models import INTEGRITY_CLASSES, Finding
 # Stable-ish identity fields; changes here deserve human follow-up but can also
 # legitimately change with firmware re-flash, restore, or iOS-version reporting.
 IDENTITY_FIELDS = [
-    "ProductType", "ProductVersion", "BuildVersion", "ModelNumber", "HardwareModel",
-    "SerialNumber", "InternationalMobileEquipmentIdentity", "UniqueDeviceID",
-    "TotalDiskCapacity", "TotalDataCapacity", "ActivationState", "CarrierBundleVersion",
+    "ProductType",
+    "ProductVersion",
+    "BuildVersion",
+    "ModelNumber",
+    "HardwareModel",
+    "SerialNumber",
+    "InternationalMobileEquipmentIdentity",
+    "UniqueDeviceID",
+    "TotalDiskCapacity",
+    "TotalDataCapacity",
+    "ActivationState",
+    "CarrierBundleVersion",
 ]
 
 # The hard-identity triplet used to decide whether two snapshots can be linked
@@ -63,7 +73,13 @@ CONTINUITY_FIELDS = ("UniqueDeviceID", "SerialNumber", "InternationalMobileEquip
 # the module docstring still promised the BLOCKER rule. Match on names, and fall
 # back to a substring sweep only for keys no collector produces today.
 HARDWARE_IDENTIFIER_FIELDS = frozenset(CONTINUITY_FIELDS) | {
-    "IMEI", "IMSI", "MEID", "ICCID", "UDID", "WiFiAddress", "BluetoothAddress",
+    "IMEI",
+    "IMSI",
+    "MEID",
+    "ICCID",
+    "UDID",
+    "WiFiAddress",
+    "BluetoothAddress",
     "PhoneNumber",
 }
 
@@ -85,6 +101,7 @@ def _re_key(name: str) -> str:
     """Normalize a field name the same way :func:`_is_hardware_identifier` does."""
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
+
 # Compared in integer bytes; a value too small to be bytes is read as a GB tier.
 CAPACITY_FIELDS = ("TotalDiskCapacity", "TotalDataCapacity")
 
@@ -104,26 +121,42 @@ BENIGN_PATTERNS = ("ProductVersion", "BuildVersion", "ActivationState", "Carrier
 
 # Hardware-telemetry candidates that, when they change between snapshots, most
 # plausibly indicate component wear (not replacement).
-WEAR_CANDIDATES = ("yclecount", "fullchargecapacity", "maximumfacapacity", "designcapacity", "cyccount")
+WEAR_CANDIDATES = (
+    "yclecount",
+    "fullchargecapacity",
+    "maximumfacapacity",
+    "designcapacity",
+    "cyccount",
+)
 
 # The only sources that may ever produce `replacement_indicated`
 # (docs/v4/tampering-indicators.md). Anything else — including a metadata diff
 # between two snapshots — is refused by classify_assertion.
-SUPPORTED_REPLACEMENT_SOURCES = ("parts_and_service_history", "diagnostic_service", "technician_verified")
+SUPPORTED_REPLACEMENT_SOURCES = (
+    "parts_and_service_history",
+    "diagnostic_service",
+    "technician_verified",
+)
 
 # Compact (lowercase, no spaces) identity-field name → canonical v4 spelling.
 # Feeds normalize_device: "Product Type" / "producttype" / "Serial Number" all
 # resolve to the same canonical key, with the exact canonical spelling winning.
 _CANONICAL_BY_COMPACT = {name.lower().replace(" ", ""): name for name in IDENTITY_FIELDS}
 # Shorthand keys that appear in some legacy/merged reports.
-_CANONICAL_BY_COMPACT.update({"udid": "UniqueDeviceID",
-                              "imei": "InternationalMobileEquipmentIdentity"})
+_CANONICAL_BY_COMPACT.update(
+    {"udid": "UniqueDeviceID", "imei": "InternationalMobileEquipmentIdentity"}
+)
 
 # Severity per class for asserted (never inferred) classifications.
 _ASSERTION_SEVERITY = {
-    "verified": "INFO", "consistent": "INFO", "change_detected": "REVIEW",
-    "replacement_indicated": "WARNING", "suspicious": "REVIEW",
-    "inconclusive": "INFO", "not_detectable": "INFO", "not_tested": "INFO",
+    "verified": "INFO",
+    "consistent": "INFO",
+    "change_detected": "REVIEW",
+    "replacement_indicated": "WARNING",
+    "suspicious": "REVIEW",
+    "inconclusive": "INFO",
+    "not_detectable": "INFO",
+    "not_tested": "INFO",
     "unsupported": "INFO",
 }
 
@@ -161,7 +194,7 @@ def _canonical_capacity(value: Any) -> Any:
     had_unit_suffix = False
     for suffix in ("gib", "gb"):
         if text.lower().endswith(suffix):
-            text = text[:-len(suffix)].strip()
+            text = text[: -len(suffix)].strip()
             had_unit_suffix = True
             break
     try:
@@ -213,15 +246,15 @@ def normalize_device(report: dict[str, Any] | None) -> dict[str, Any]:
         if not isinstance(source, dict):
             return {}
     elif any(_canonical_field(key) for key in report):
-        source = report            # bare device record, no report wrapper
+        source = report  # bare device record, no report wrapper
     else:
-        return {}                  # report without device data: keep it empty
+        return {}  # report without device data: keep it empty
 
     resolved: dict[str, Any] = {}
     for key, value in source.items():
         target = _canonical_field(key) or key
         if target in resolved:
-            if key == target:      # exact canonical spelling beats a legacy alias
+            if key == target:  # exact canonical spelling beats a legacy alias
                 resolved[target] = value
             continue
         resolved[target] = value
@@ -231,8 +264,9 @@ def normalize_device(report: dict[str, Any] | None) -> dict[str, Any]:
     return resolved
 
 
-def classify_change(field_name: str, previous: Any, current: Any,
-                    source: str = "") -> tuple[str, Finding]:
+def classify_change(
+    field_name: str, previous: Any, current: Any, source: str = ""
+) -> tuple[str, Finding]:
     """Return (classification, Finding) for one differing field."""
     severity = "REVIEW"
     confidence = "low"
@@ -247,7 +281,8 @@ def classify_change(field_name: str, previous: Any, current: Any,
         explanation = (
             f"{field_name} changed between snapshots. Most plausible causes: iOS update, restore, or "
             f"reporting differences between tool versions. Verify the device is the same physical hardware "
-            f"(serial, IMEI, UDID) before treating this as evidence about the device itself.")
+            f"(serial, IMEI, UDID) before treating this as evidence about the device itself."
+        )
         next_test = "Re-verify with the seller that the device has not been swapped."
     elif any(w in field_lower for w in WEAR_CANDIDATES):
         classification = "change_detected"
@@ -255,9 +290,12 @@ def classify_change(field_name: str, previous: Any, current: Any,
         explanation = (
             "Battery telemetry changed between snapshots. Wear accumulation is normal; a sudden large "
             "jump in *capacity* between snapshots is more suspicious than a cycle-count increase, "
-            "because capacity drop is monotonic on real hardware.")
-        next_test = ("If the capacity figure *increased* between two inspections of the same claimed device, "
-                     "physically re-verify identity (serial/IMEI shown in Settings vs report) before continuing.")
+            "because capacity drop is monotonic on real hardware."
+        )
+        next_test = (
+            "If the capacity figure *increased* between two inspections of the same claimed device, "
+            "physically re-verify identity (serial/IMEI shown in Settings vs report) before continuing."
+        )
         evidence.append("diagnostics GasGauge")
     elif field_lower.startswith("diagnostic:"):
         classification = "change_detected"
@@ -271,14 +309,18 @@ def classify_change(field_name: str, previous: Any, current: Any,
             "A hardware identifier reported as changed between snapshots is a serious discrepancy. "
             "This is *not automatically proof* of a swapped logic board — iOS restore/repair tooling can "
             "legitimately rewrite some reporting — but the phone must not be paid for until identity is "
-            "independently confirmed in Settings → General → About and against the seller's documentation.")
-        next_test = ("Physically read the serial/IMEI from Settings or the SIM tray and compare against both "
-                     "snapshots; escalate to an authorized service provider for parts-and-service history.")
+            "independently confirmed in Settings → General → About and against the seller's documentation."
+        )
+        next_test = (
+            "Physically read the serial/IMEI from Settings or the SIM tray and compare against both "
+            "snapshots; escalate to an authorized service provider for parts-and-service history."
+        )
     else:
         classification = "suspicious"
         explanation = (
             "An unexplained difference between snapshots. Could be a re-flash, a repaired/reprogrammed "
-            "component, or simply different tool versions or pairing states. Investigate before concluding.")
+            "component, or simply different tool versions or pairing states. Investigate before concluding."
+        )
 
     finding = Finding(
         severity=severity,
@@ -293,9 +335,15 @@ def classify_change(field_name: str, previous: Any, current: Any,
     return classification, finding
 
 
-def classify_assertion(classification: str, claim: str, *, evidence: list[str] | None = None,
-                       source: str = "", confidence: str = "medium",
-                       next_test: str = "") -> tuple[str, Finding]:
+def classify_assertion(
+    classification: str,
+    claim: str,
+    *,
+    evidence: list[str] | None = None,
+    source: str = "",
+    confidence: str = "medium",
+    next_test: str = "",
+) -> tuple[str, Finding]:
     """The single constructor for classifications the engine never *infers*.
 
     `classify_change()`/`assess_integrity()` only ever infer `consistent`,
@@ -329,7 +377,8 @@ def classify_assertion(classification: str, claim: str, *, evidence: list[str] |
             raise ValueError(
                 "replacement_indicated requires a supported diagnostic source "
                 f"{SUPPORTED_REPLACEMENT_SOURCES}; a change in software-reported metadata is never a "
-                f"part-swap claim (got source={source!r}).")
+                f"part-swap claim (got source={source!r})."
+            )
         if not evidence_paths:
             raise ValueError("replacement_indicated requires the diagnostic artifact as evidence.")
     elif classification == "verified" and not evidence_paths:
@@ -351,8 +400,11 @@ def classify_assertion(classification: str, claim: str, *, evidence: list[str] |
     return classification, finding
 
 
-def assess_integrity(previous: dict[str, Any] | None, current: dict[str, Any],
-                     buyer_data: dict[str, Any] | None = None) -> dict[str, Any]:
+def assess_integrity(
+    previous: dict[str, Any] | None,
+    current: dict[str, Any],
+    buyer_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Cross-snapshot integrity classification.
 
     `previous` is the previous report dict (v3 or v4 schema — missing
@@ -387,11 +439,16 @@ def assess_integrity(previous: dict[str, Any] | None, current: dict[str, Any],
     curr_device = normalize_device(current)
 
     # Continuity state (finding is appended after the field-by-field pass).
-    identity_recorded = any(_present(prev_device.get(field)) or _present(curr_device.get(field))
-                            for field in CONTINUITY_FIELDS)
-    shared_identity = [field for field in CONTINUITY_FIELDS
-                       if _present(prev_device.get(field))
-                       and _norm(prev_device.get(field)) == _norm(curr_device.get(field))]
+    identity_recorded = any(
+        _present(prev_device.get(field)) or _present(curr_device.get(field))
+        for field in CONTINUITY_FIELDS
+    )
+    shared_identity = [
+        field
+        for field in CONTINUITY_FIELDS
+        if _present(prev_device.get(field))
+        and _norm(prev_device.get(field)) == _norm(curr_device.get(field))
+    ]
     if not previous:
         continuity = "not_tested"
     elif shared_identity:
@@ -404,40 +461,66 @@ def assess_integrity(previous: dict[str, Any] | None, current: dict[str, Any],
         if prev_value is None and curr_value is None:
             continue
         if prev_value is None or curr_value is None:
-            changes.append({"field": field_name, "previous": prev_value, "current": curr_value,
-                            "status": "not_comparable",
-                            "confidence": "none",
-                            "note": "One snapshot lacks this field; comparison cannot be made."})
-            findings.append(Finding(
-                severity="INFO", title=f"Field not comparable: {field_name}",
-                detail="One snapshot lacks this field, so no change claim can be made.",
-                confidence="high", classification="inconclusive"))
+            changes.append(
+                {
+                    "field": field_name,
+                    "previous": prev_value,
+                    "current": curr_value,
+                    "status": "not_comparable",
+                    "confidence": "none",
+                    "note": "One snapshot lacks this field; comparison cannot be made.",
+                }
+            )
+            findings.append(
+                Finding(
+                    severity="INFO",
+                    title=f"Field not comparable: {field_name}",
+                    detail="One snapshot lacks this field, so no change claim can be made.",
+                    confidence="high",
+                    classification="inconclusive",
+                )
+            )
             classifications[field_name] = "inconclusive"
             continue
         if _norm(prev_value) == _norm(curr_value):
             classifications[field_name] = "consistent"
             continue
         classification, finding = classify_change(field_name, prev_value, curr_value)
-        changes.append({"field": field_name, "previous": prev_value, "current": curr_value,
-                        "status": "changed", "classification": classification,
-                        "severity": finding.severity, "confidence": finding.confidence,
-                        "next_test": finding.next_test})
+        changes.append(
+            {
+                "field": field_name,
+                "previous": prev_value,
+                "current": curr_value,
+                "status": "changed",
+                "classification": classification,
+                "severity": finding.severity,
+                "confidence": finding.confidence,
+                "next_test": finding.next_test,
+            }
+        )
         findings.append(finding)
         classifications[field_name] = classification
 
     if continuity == "not_detectable":
-        findings.append(Finding(
-            severity="INFO",
-            title="Device continuity cannot be established",
-            detail=("The two snapshots share no recorded hardware identifier (UDID, serial, IMEI): at least one "
+        findings.append(
+            Finding(
+                severity="INFO",
+                title="Device continuity cannot be established",
+                detail=(
+                    "The two snapshots share no recorded hardware identifier (UDID, serial, IMEI): at least one "
                     "side has none recorded, or the recorded values do not match. Nothing here confirms the two "
                     "reports describe the same physical device, so treat every agreement below as agreement about "
-                    "reported metadata only — not evidence that the device is unchanged or genuine."),
-            confidence="high",
-            evidence=["report.json (previous)", "report.json (current)"],
-            classification="not_detectable",
-            next_test=("Read the serial and IMEI from Settings → General → About (or the SIM tray) and compare them "
-                       "against both snapshots and the seller's documentation.")))
+                    "reported metadata only — not evidence that the device is unchanged or genuine."
+                ),
+                confidence="high",
+                evidence=["report.json (previous)", "report.json (current)"],
+                classification="not_detectable",
+                next_test=(
+                    "Read the serial and IMEI from Settings → General → About (or the SIM tray) and compare them "
+                    "against both snapshots and the seller's documentation."
+                ),
+            )
+        )
 
     # Buyer-stated vs observed cross-check.
     if isinstance(buyer_data, dict):
@@ -447,39 +530,53 @@ def assess_integrity(previous: dict[str, Any] | None, current: dict[str, Any],
         advertised_storage_gb = _norm(observations.get("reported_storage_gb"))
         observed_disk_gb = None
         try:
-            observed_disk_gb = round(int(curr_device.get("TotalDiskCapacity", 0)) / 1_000_000_000, 1)
+            observed_disk_gb = round(
+                int(curr_device.get("TotalDiskCapacity", 0)) / 1_000_000_000, 1
+            )
         except (TypeError, ValueError):
             pass
         if advertised_model and curr_device:
-            model_matches = advertised_model.lower() in _norm(curr_device.get("ProductType")) or \
-                            advertised_model.lower() in _norm(curr_device.get("MarketingName",
-                                                                    curr_device.get("DeviceName", "")))
+            model_matches = advertised_model.lower() in _norm(
+                curr_device.get("ProductType")
+            ) or advertised_model.lower() in _norm(
+                curr_device.get("MarketingName", curr_device.get("DeviceName", ""))
+            )
             if not model_matches:
-                findings.append(Finding(
-                    severity="REVIEW",
-                    title="Advertised model does not match device-reported identity",
-                    detail=(f"Seller advertised “{advertised_model}”; device reports ProductType="
+                findings.append(
+                    Finding(
+                        severity="REVIEW",
+                        title="Advertised model does not match device-reported identity",
+                        detail=(
+                            f"Seller advertised “{advertised_model}”; device reports ProductType="
                             f"{curr_device.get('ProductType', 'unknown')}. Marketing names also differ from the advertised "
-                            f"model string. This may be a listing typo or a misrepresentation — verify before paying."),
-                    confidence="medium",
-                    classification="suspicious",
-                    next_test="Compare the model shown in Settings → General → About against the listing.",
-                    evidence=["buyer-checklist.json", "device-info plist"]))
+                            f"model string. This may be a listing typo or a misrepresentation — verify before paying."
+                        ),
+                        confidence="medium",
+                        classification="suspicious",
+                        next_test="Compare the model shown in Settings → General → About against the listing.",
+                        evidence=["buyer-checklist.json", "device-info plist"],
+                    )
+                )
                 classifications["advertised_model"] = "suspicious"
         if advertised_storage_gb and observed_disk_gb and advertised_storage_gb:
             try:
                 advertised_value = float(observations.get("reported_storage_gb"))
                 if abs(advertised_value - observed_disk_gb) > max(2.0, advertised_value * 0.1):
-                    findings.append(Finding(
-                        severity="REVIEW",
-                        title="Advertised storage differs from iOS-reported capacity beyond rounding",
-                        detail=(f"Seller/observations claim ~{advertised_value:g} GB; iOS reports {observed_disk_gb} GB "
+                    findings.append(
+                        Finding(
+                            severity="REVIEW",
+                            title="Advertised storage differs from iOS-reported capacity beyond rounding",
+                            detail=(
+                                f"Seller/observations claim ~{advertised_value:g} GB; iOS reports {observed_disk_gb} GB "
                                 f"(decimal). Marketing/OS rounding can differ by a GB or two; bigger gaps warrant "
-                                f"verification."),
-                        confidence="medium",
-                        classification="suspicious",
-                        next_test="Compare Settings → General → iPhone Storage against the listing.",
-                        evidence=["buyer-checklist.json", "device-info plist"]))
+                                f"verification."
+                            ),
+                            confidence="medium",
+                            classification="suspicious",
+                            next_test="Compare Settings → General → iPhone Storage against the listing.",
+                            evidence=["buyer-checklist.json", "device-info plist"],
+                        )
+                    )
                     classifications["advertised_storage"] = "suspicious"
             except (TypeError, ValueError):
                 pass
@@ -505,7 +602,11 @@ def assess_integrity(previous: dict[str, Any] | None, current: dict[str, Any],
     # Continuity cap: identity was recorded somewhere but links nothing, so an
     # affirmative verdict overstates what the evidence supports. `suspicious`
     # (serial/IMEI/UDID BLOCKER, buyer cross-check) is never downgraded here.
-    if continuity == "not_detectable" and identity_recorded and overall in ("consistent", "change_detected"):
+    if (
+        continuity == "not_detectable"
+        and identity_recorded
+        and overall in ("consistent", "change_detected")
+    ):
         overall = "inconclusive"
 
     return {
@@ -514,9 +615,11 @@ def assess_integrity(previous: dict[str, Any] | None, current: dict[str, Any],
         "classifications": classifications,
         "changes": changes,
         "findings": [f.to_dict() for f in findings],
-        "disclaimer": ("A change in software-reported metadata alone is never proof of a physical component "
-                       "replacement. Only concrete diagnostic assertions (e.g. Apple's Parts & Service History, "
-                       "a supported diagnostic service, or technician-verified evidence) can indicate a replacement."),
+        "disclaimer": (
+            "A change in software-reported metadata alone is never proof of a physical component "
+            "replacement. Only concrete diagnostic assertions (e.g. Apple's Parts & Service History, "
+            "a supported diagnostic service, or technician-verified evidence) can indicate a replacement."
+        ),
     }
 
 
@@ -540,19 +643,24 @@ def audit_integrity_claims(report: dict[str, Any]) -> list[str]:
     for field_name, classification in (integrity.get("classifications") or {}).items():
         if str(classification).strip().lower() != "replacement_indicated":
             continue
-        sources = [str(change.get("source", "")) for change in integrity.get("changes", [])
-                   if isinstance(change, dict)]
+        sources = [
+            str(change.get("source", ""))
+            for change in integrity.get("changes", [])
+            if isinstance(change, dict)
+        ]
         if not any(_norm(source) in SUPPORTED_REPLACEMENT_SOURCES for source in sources):
             violations.append(
                 f"component_replaced: {field_name} claims replacement without a supported "
-                f"diagnostic source -> {fallback_for('component_replaced')}")
+                f"diagnostic source -> {fallback_for('component_replaced')}"
+            )
 
     # Continuity may be reported, but never as a clean bill of health.
     continuity = str(integrity.get("continuity") or "").strip().lower()
     if continuity == "established" and not _has_hardware_bound_identifier(report):
         violations.append(
             f"never_tampered: continuity asserted without a hardware-bound identifier "
-            f"-> {fallback_for('never_tampered')}")
+            f"-> {fallback_for('never_tampered')}"
+        )
 
     return violations
 

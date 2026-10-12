@@ -8,6 +8,7 @@ This module is also the single writer of ``manifest.json`` (v5 output
 layout, docs/v5/03-output-layout.md) and owns the run-directory layout
 helpers (:func:`run_dir_paths`, :func:`write_readme_txt`).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,6 +29,7 @@ EVIDENCE_DIR_NAME = "evidence"
 # run stays analyzable.
 LEGACY_EVIDENCE_DIR_NAME = "raw"
 
+
 def build_manifest(run_dir: Path) -> dict[str, Any]:
     """Hash every collected artifact (excluding reports/manifests themselves).
 
@@ -36,17 +38,25 @@ def build_manifest(run_dir: Path) -> dict[str, Any]:
     disk are hashed, so a collector that produced no output leaves no
     manifest entry (no phantom artifacts).
     """
-    excluded = {"manifest.json", "report.json", "report.html",
-                "report-redacted.json", "report-redacted.html", "buyer-checklist.json"}
+    excluded = {
+        "manifest.json",
+        "report.json",
+        "report.html",
+        "report-redacted.json",
+        "report-redacted.html",
+        "buyer-checklist.json",
+    }
     entries: list[dict[str, Any]] = []
     for path in sorted(run_dir.rglob("*")):
         if not path.is_file() or path.name in excluded:
             continue
-        entries.append({
-            "path": str(path.relative_to(run_dir)),
-            "size_bytes": path.stat().st_size,
-            "sha256": sha256_file(path),
-        })
+        entries.append(
+            {
+                "path": str(path.relative_to(run_dir)),
+                "size_bytes": path.stat().st_size,
+                "sha256": sha256_file(path),
+            }
+        )
     manifest = {"schema_version": SCHEMA_VERSION, "artifacts": entries}
     write_json(run_dir / "manifest.json", manifest)
     return manifest
@@ -58,14 +68,24 @@ def verify_manifest(run_dir_or_manifest: Path) -> dict[str, Any]:
     Accepts either a run directory containing manifest.json or a path directly
     to any manifest JSON file.
     """
-    manifest_path = (run_dir_or_manifest / "manifest.json") if run_dir_or_manifest.is_dir() \
+    manifest_path = (
+        (run_dir_or_manifest / "manifest.json")
+        if run_dir_or_manifest.is_dir()
         else run_dir_or_manifest
+    )
     try:
         import json
+
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        return {"verified": False, "error": f"cannot read manifest: {exc}",
-                "matched": 0, "changed": 0, "missing": 0, "added": []}
+        return {
+            "verified": False,
+            "error": f"cannot read manifest: {exc}",
+            "matched": 0,
+            "changed": 0,
+            "missing": 0,
+            "added": [],
+        }
 
     # v4 manifests are {"schema_version": ..., "artifacts": [...]}; v3 manifests
     # were a bare list of entries. Accept both so older runs remain verifiable.
@@ -74,8 +94,14 @@ def verify_manifest(run_dir_or_manifest: Path) -> dict[str, Any]:
     elif isinstance(manifest, dict):
         artifacts = manifest.get("artifacts", [])
     else:
-        return {"verified": False, "error": "manifest must be a list or an object with 'artifacts'",
-                "matched": 0, "changed": 0, "missing": 0, "added": []}
+        return {
+            "verified": False,
+            "error": "manifest must be a list or an object with 'artifacts'",
+            "matched": 0,
+            "changed": 0,
+            "missing": 0,
+            "added": [],
+        }
 
     base = manifest_path.parent
     matched = changed = missing = 0
@@ -90,6 +116,7 @@ def verify_manifest(run_dir_or_manifest: Path) -> dict[str, Any]:
             problems.append({"path": entry["path"], "problem": "missing"})
             continue
         import hashlib
+
         digest = hashlib.sha256()
         with path.open("rb") as stream:
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -103,14 +130,22 @@ def verify_manifest(run_dir_or_manifest: Path) -> dict[str, Any]:
         if not path.is_file():
             continue
         rel = str(path.relative_to(base))
-        if rel in known_paths or rel in {"manifest.json", "report.json", "report.html",
-                                         "report-redacted.json", "report-redacted.html",
-                                         "buyer-checklist.json"}:
+        if rel in known_paths or rel in {
+            "manifest.json",
+            "report.json",
+            "report.html",
+            "report-redacted.json",
+            "report-redacted.html",
+            "buyer-checklist.json",
+        }:
             continue
         added.append(rel)
     return {
         "verified": changed == 0 and missing == 0,
-        "matched": matched, "changed": changed, "missing": missing, "added": added,
+        "matched": matched,
+        "changed": changed,
+        "missing": missing,
+        "added": added,
         "problems": problems,
         "note": "Matching hashes prove files have not changed since hashing. They do not prove the original data was authentic.",
     }

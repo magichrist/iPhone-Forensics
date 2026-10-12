@@ -10,6 +10,7 @@ Checks:
   * the documented exit codes match the engine's constants;
   * the documented run-directory layout matches what a run actually creates.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -44,16 +45,16 @@ def test_readme_documents_the_facade_commands():
     """
     text = _readme()
     parser = cli._build_parser()
-    subparsers = next(action for action in parser._actions
-                      if getattr(action, "_choices_actions", None))
+    subparsers = next(
+        action for action in parser._actions if getattr(action, "_choices_actions", None)
+    )
     actual = {entry.dest for entry in subparsers._choices_actions}
 
     facade = {"devices", "inspect", "doctor", "compare"}
     assert facade <= actual, f"facade commands missing from the CLI: {sorted(facade - actual)}"
 
     for command in facade:
-        assert f"iphone-forensics {command}" in text, \
-            f"README does not document `{command}`"
+        assert f"iphone-forensics {command}" in text, f"README does not document `{command}`"
 
 
 def test_readme_does_not_advertise_the_retired_cli():
@@ -64,7 +65,8 @@ def test_readme_does_not_advertise_the_retired_cli():
         if stripped.startswith("$ iphone-surgery"):
             # A migration note may name it once; a usage example may not.
             raise AssertionError(
-                f"README still shows a `iphone-surgery` command example: {stripped!r}")
+                f"README still shows a `iphone-surgery` command example: {stripped!r}"
+            )
 
 
 def test_every_command_the_readme_shows_actually_exists():
@@ -72,8 +74,9 @@ def test_every_command_the_readme_shows_actually_exists():
     text = _readme()
     documented = set(re.findall(r"iphone-forensics ([a-z-]+)", text))
     parser = cli._build_parser()
-    subparsers = next(action for action in parser._actions
-                      if getattr(action, "_choices_actions", None))
+    subparsers = next(
+        action for action in parser._actions if getattr(action, "_choices_actions", None)
+    )
     actual = {entry.dest for entry in subparsers._choices_actions}
     # Global flags are documented in the README but are not subcommands.
     # `--help`/`--version` are argparse's own and exit via SystemExit, so they are
@@ -134,8 +137,9 @@ def test_documented_exit_codes_match_the_engine():
     # The removed codes must not creep back into the constants or the README.
     assert not hasattr(cli_v4, "EXIT_PARTIAL"), "EXIT_PARTIAL is unreachable; remove it"
     assert not hasattr(cli_v4, "EXIT_TOOL_FAILURE"), "EXIT_TOOL_FAILURE is unreachable; remove it"
-    assert "`5`" not in text and "`6`" not in text, \
+    assert "`5`" not in text and "`6`" not in text, (
         "exit codes 5 and 6 are no longer returned and must not be documented"
+    )
 
 
 def test_readme_shows_the_real_run_directory_layout(tmp_path: Path):
@@ -170,16 +174,20 @@ def test_readme_names_the_advanced_interface_exactly_once_as_the_advanced_one():
     # It must not present iphone-surgery as the primary entry point.
     assert "iphone-surgery" in text
     primary_block = text.split("## Advanced interface")[0]
-    assert "iphone-surgery" not in primary_block, \
+    assert "iphone-surgery" not in primary_block, (
         "the advanced engine must not appear in the documented four-command path"
+    )
 
 
-@pytest.mark.parametrize("claim", [
-    "Coverage is not health",
-    "not collected",
-    "Failed vs unavailable",
-    "Manual check required",
-])
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Coverage is not health",
+        "not collected",
+        "Failed vs unavailable",
+        "Manual check required",
+    ],
+)
 def test_readme_teaches_the_honesty_rules(claim):
     """The reading rules a user needs to interpret the report correctly."""
     assert claim.lower() in _readme().lower()

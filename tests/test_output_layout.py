@@ -4,6 +4,7 @@ Covers the unique run-dir guarantee (never overwrite), manifest <-> files
 agreement, no phantom artifacts for collectors that produced no output, and
 README.txt content.
 """
+
 import json
 from pathlib import Path
 
@@ -57,12 +58,11 @@ def test_manifest_agrees_with_files_on_disk(tmp_path: Path):
     run_dir = tmp_path / "run"
     evidence = run_dir / "evidence"
     evidence.mkdir(parents=True)
-    (evidence / "device-info.json").write_text(json.dumps({"model": "iPhone15,4"}),
-                                               encoding="utf-8")
-    (evidence / "hardware.json").write_text(json.dumps({"battery": "ok"}),
-                                            encoding="utf-8")
-    (run_dir / "report.json").write_text(json.dumps({"schema_version": "4.0.0"}),
-                                         encoding="utf-8")
+    (evidence / "device-info.json").write_text(
+        json.dumps({"model": "iPhone15,4"}), encoding="utf-8"
+    )
+    (evidence / "hardware.json").write_text(json.dumps({"battery": "ok"}), encoding="utf-8")
+    (run_dir / "report.json").write_text(json.dumps({"schema_version": "4.0.0"}), encoding="utf-8")
     (run_dir / "report.html").write_text("<html></html>", encoding="utf-8")
 
     manifest = build_manifest(run_dir)

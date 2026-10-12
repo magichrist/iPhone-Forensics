@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from iphone_forensics.repair import load_or_create, new_case, qa_summary, record_work
+from iphone_forensics.repair import new_case, qa_summary, record_work
 
 
 def test_new_case_defaults():
@@ -32,6 +32,7 @@ def test_compare_pre_post_requires_both_reports(tmp_path: Path):
     case = new_case("CASE-1")
     result = qa = None
     from iphone_forensics.repair import compare_pre_post
+
     result = compare_pre_post(case)
     assert result["status"] == "incomplete"
     pre = tmp_path / "pre.json"
@@ -41,14 +42,16 @@ def test_compare_pre_post_requires_both_reports(tmp_path: Path):
     case["pre_repair_baseline"] = str(pre)
     case["post_repair_report"] = str(post)
     result = compare_pre_post(case)
-    assert result["overall"] == "suspicious"   # serial mismatch between pre and post
+    assert result["overall"] == "suspicious"  # serial mismatch between pre and post
 
 
 def _run_cli(*argv: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "iphone_forensics.cli_v4", *argv],
-        capture_output=True, text=True,
-        env={"PYTHONPATH": "src", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"})
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": "src", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"},
+    )
 
 
 def test_cli_doctor_offline_ok():

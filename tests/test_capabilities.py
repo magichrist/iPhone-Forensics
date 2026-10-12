@@ -2,6 +2,7 @@
 
 Pure data — no device or tool chain required.
 """
+
 from iphone_forensics.capabilities import (
     CAPABILITIES,
     COVERAGE_LEVELS,
@@ -24,15 +25,32 @@ def test_all_coverage_values_in_allowed_set():
 
 def test_every_spec_category_present():
     # §3 categories required by docs/v4/phase-2-hardware.md
-    for category in ("identity", "battery", "storage", "display", "cameras",
-                     "biometrics", "connectivity", "thermal", "physical"):
+    for category in (
+        "identity",
+        "battery",
+        "storage",
+        "display",
+        "cameras",
+        "biometrics",
+        "connectivity",
+        "thermal",
+        "physical",
+    ):
         assert by_category(category), f"missing §3 category: {category}"
 
 
 def test_every_entry_has_source_requirements_limits():
     for row in CAPABILITIES:
-        for key in ("category", "item", "coverage", "source", "requirements", "limits",
-                    "model_applicability", "ios_applicability"):
+        for key in (
+            "category",
+            "item",
+            "coverage",
+            "source",
+            "requirements",
+            "limits",
+            "model_applicability",
+            "ios_applicability",
+        ):
             assert key in row, f"{row.get('item')}: missing key {key!r}"
 
 

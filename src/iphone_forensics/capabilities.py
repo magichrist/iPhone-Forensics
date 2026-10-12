@@ -6,6 +6,7 @@ software. Pure data + tiny query helpers — no I/O, no dependencies. `cmd_capab
 and the report's "Unknown/unsupported" section consume this instead of a
 hardcoded table.
 """
+
 from __future__ import annotations
 
 import re
@@ -354,21 +355,29 @@ CLAIM_MATRIX: list[dict[str, str]] = [
     {
         "claim": "battery_metric",
         "requires": "A unit-verified candidate with its source cited.",
-        "otherwise": ("inconclusive: say the value is unlabelled and must be confirmed in "
-                      "Settings > Battery > Battery Health."),
+        "otherwise": (
+            "inconclusive: say the value is unlabelled and must be confirmed in "
+            "Settings > Battery > Battery Health."
+        ),
     },
     {
         "claim": "component_replaced",
-        "requires": ("integrity.classify_assertion() returning replacement_indicated, with a "
-                     "supported source and an artifact behind it."),
-        "otherwise": ("at most change_detected or suspicious from a metadata difference; a "
-                      "diff is not a repair record."),
+        "requires": (
+            "integrity.classify_assertion() returning replacement_indicated, with a "
+            "supported source and an artifact behind it."
+        ),
+        "otherwise": (
+            "at most change_detected or suspicious from a metadata difference; a "
+            "diff is not a repair record."
+        ),
     },
     {
         "claim": "part_genuine_or_counterfeit",
         "requires": "Never obtainable with this toolchain.",
-        "otherwise": ("not_detectable, with a pointer to an authorised service provider; "
-                      "Apple exposes no public parts-pairing API."),
+        "otherwise": (
+            "not_detectable, with a pointer to an authorised service provider; "
+            "Apple exposes no public parts-pairing API."
+        ),
     },
     {
         "claim": "faceid_display_sensor_healthy",
@@ -378,8 +387,10 @@ CLAIM_MATRIX: list[dict[str, str]] = [
     {
         "claim": "malware_free",
         "requires": "Never claimed by this tool.",
-        "otherwise": ("report only what triage found; a clean scan means 'no indicators "
-                      "matched', with an explicit false-positive warning."),
+        "otherwise": (
+            "report only what triage found; a clean scan means 'no indicators "
+            "matched', with an explicit false-positive warning."
+        ),
     },
     {
         "claim": "never_tampered",
@@ -542,8 +553,10 @@ _FORBIDDEN_ASSERTIONS: tuple[tuple[str, str], ...] = (
     (r"\bno malware\b", "malware_free"),
     (r"\bnever tampered\b", "never_tampered"),
     (r"\bface ?id (?:is|are) (?:verified|working|healthy)\b", "faceid_display_sensor_healthy"),
-    (r"\b(?:display|sensors?) (?:is|are) (?:verified|working|healthy)\b",
-     "faceid_display_sensor_healthy"),
+    (
+        r"\b(?:display|sensors?) (?:is|are) (?:verified|working|healthy)\b",
+        "faceid_display_sensor_healthy",
+    ),
 )
 
 
@@ -582,10 +595,11 @@ def audit_report(report: dict[str, Any]) -> list[str]:
     violations: list[str] = []
     for pattern, claim in _FORBIDDEN_ASSERTIONS:
         for text in _texts(report):
-            if re.search(pattern, text, re.I):
+            if re.search(pattern, text, re.IGNORECASE):
                 violations.append(
                     f"{claim}: forbidden assertion {pattern!r} found in report data "
-                    f"-> {fallback_for(claim)}")
+                    f"-> {fallback_for(claim)}"
+                )
                 break  # one violation per claim is enough to act on
     return violations
 

@@ -4,6 +4,7 @@ Each test here pins a bug that shipped with a green test suite: the original
 tests all passed while these behaviours were broken. They are grouped by the
 guarantee they protect, not by the module under test.
 """
+
 from __future__ import annotations
 
 import json
@@ -23,8 +24,13 @@ def _report(**overrides):
         "schema_version": "5.0.0",
         "version": "5.0.0",
         "device": {"ProductType": "iPhone15,2", "SerialNumber": SERIAL, "UniqueDeviceID": UDID},
-        "collection": [{"name": "device-info-xml", "status": "collected",
-                        "command": ["ideviceinfo", "-u", UDID]}],
+        "collection": [
+            {
+                "name": "device-info-xml",
+                "status": "collected",
+                "command": ["ideviceinfo", "-u", UDID],
+            }
+        ],
         "findings": [],
         "scope": {},
         "target_udid": UDID,
@@ -35,6 +41,7 @@ def _report(**overrides):
 
 
 # ----------------------------------------------------------------- HTML shell
+
 
 def test_report_has_exactly_one_style_block(tmp_path: Path):
     """A duplicated `<style>` made the CSS parser drop the whole :root block.
@@ -59,6 +66,7 @@ def test_css_custom_properties_survive_rendering(tmp_path: Path):
 
 # ------------------------------------------------------------------- manifest
 
+
 def test_manifest_is_written_after_every_artifact(tmp_path: Path):
     """The manifest hashed the directory before the reports landed in it."""
     reporting.finalize(tmp_path, _report(), redact_identifiers=True)
@@ -80,8 +88,10 @@ def test_manifest_verifies_against_the_run_that_wrote_it(tmp_path: Path):
     assert result["verified"] is True, result["problems"]
     assert result["changed"] == 0 and result["missing"] == 0
     # The evidence file must be covered, not silently absent.
-    assert any(a["path"].endswith("device-info.stdout.txt")
-               for a in json.loads((tmp_path / "manifest.json").read_text())["artifacts"])
+    assert any(
+        a["path"].endswith("device-info.stdout.txt")
+        for a in json.loads((tmp_path / "manifest.json").read_text())["artifacts"]
+    )
 
 
 def test_manifest_writer_is_single(tmp_path: Path):
@@ -99,6 +109,7 @@ def test_manifest_writer_is_single(tmp_path: Path):
 
 # ------------------------------------------------------------------- redaction
 
+
 def test_redacted_artifacts_contain_no_identifier_anywhere(tmp_path: Path):
     """Redaction must not leak a device identifier.
 
@@ -107,13 +118,17 @@ def test_redacted_artifacts_contain_no_identifier_anywhere(tmp_path: Path):
     reached report-redacted.json in the clear — and so did the HTML rendered from
     it.
     """
-    report = _report(findings=[{
-        "severity": "INFO",
-        "title": "Collector output referenced the device",
-        "detail": f"command targeted udid {UDID} on a device reporting IMEI {IMEI}",
-        "epistemic": "observed",
-        "evidence": [],
-    }])
+    report = _report(
+        findings=[
+            {
+                "severity": "INFO",
+                "title": "Collector output referenced the device",
+                "detail": f"command targeted udid {UDID} on a device reporting IMEI {IMEI}",
+                "epistemic": "observed",
+                "evidence": [],
+            }
+        ]
+    )
     report["device"]["InternationalMobileEquipmentIdentity"] = IMEI
 
     reporting.finalize(tmp_path, report, redact_identifiers=True)
@@ -154,13 +169,17 @@ def test_scrub_identifiers_masks_by_key_not_just_by_value():
 
 # --------------------------------------------------------------- tamper signal
 
-@pytest.mark.parametrize("field", [
-    "SerialNumber",
-    "UniqueDeviceID",
-    "InternationalMobileEquipmentIdentity",
-    "IMEI",
-    "UDID",
-])
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "SerialNumber",
+        "UniqueDeviceID",
+        "InternationalMobileEquipmentIdentity",
+        "IMEI",
+        "UDID",
+    ],
+)
 def test_every_hardware_identifier_change_is_a_blocker(field: str):
     """IMEI/UDID changes must reach BLOCKER.
 

@@ -37,6 +37,7 @@ def test_verify_detects_missing_file(tmp_path: Path):
 
 def test_verify_accepts_v3_list_manifest(tmp_path: Path):
     import hashlib
+
     (tmp_path / "raw").mkdir()
     (tmp_path / "raw" / "note.txt").write_text("hello")
     digest = hashlib.sha256(b"hello").hexdigest()

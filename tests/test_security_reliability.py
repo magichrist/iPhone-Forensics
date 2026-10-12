@@ -3,26 +3,26 @@
 Path traversal, symlink attacks, malformed evidence, oversized inputs,
 subprocess hang handling, and identifier redaction across output formats.
 """
+
 import json
-import os
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
 from iphone_forensics.analysis import analyze_crash_artifacts
+from iphone_forensics.buyer import template
 from iphone_forensics.evidence import build_manifest, verify_manifest
 from iphone_forensics.reporting import build_html
-from iphone_forensics.buyer import template
 from iphone_forensics.util import run_command, safe_name
 
-
 # ----------------------------------------------------------------- path traversal / symlinks
+
 
 def test_offline_copy_rejects_escape_via_source_is_dir(tmp_path: Path):
     """inspect --backup-dir only accepts directories; a file cannot smuggle a path out."""
     from iphone_forensics.cli_v4 import _inspect_backup
+
     not_a_dir = tmp_path / "file.json"
     not_a_dir.write_text("{}")
     run_dir = tmp_path / "run"
@@ -58,8 +58,9 @@ def test_verify_manifest_rejects_traversal_paths(tmp_path: Path):
     build_manifest(tmp_path)
     manifest_path = tmp_path / "manifest.json"
     data = json.loads(manifest_path.read_text())
-    data["artifacts"].append({"path": "../../outside/secret.txt", "size_bytes": 1,
-                              "sha256": "0" * 64})
+    data["artifacts"].append(
+        {"path": "../../outside/secret.txt", "size_bytes": 1, "sha256": "0" * 64}
+    )
     evil = tmp_path / "evil-manifest.json"
     evil.write_text(json.dumps(data))
     verdict = verify_manifest(evil)
@@ -70,10 +71,13 @@ def test_verify_manifest_rejects_traversal_paths(tmp_path: Path):
 
 # ----------------------------------------------------------------- malformed evidence
 
+
 def test_malformed_ips_content_does_not_crash_triage(tmp_path: Path):
     run = tmp_path / "run"
     (run / "raw" / "offline-evidence").mkdir(parents=True)
-    (run / "raw" / "offline-evidence" / "bad.ips").write_bytes(b"\x00\x01\x02\xff\xfe not json \xf0\x9f")
+    (run / "raw" / "offline-evidence" / "bad.ips").write_bytes(
+        b"\x00\x01\x02\xff\xfe not json \xf0\x9f"
+    )
     triage = analyze_crash_artifacts(run)
     assert triage["files_scanned"] == 1
 
@@ -93,15 +97,22 @@ def test_conflicting_telemetry_reported_not_averaged(tmp_path: Path):
             {"source": "A", "key": "CycleCount", "value": "10"},
             {"source": "B", "key": "CycleCount", "value": "9000"},
         ],
-        "device": {}, "crash_triage": {},
+        "device": {},
+        "crash_triage": {},
     }
-    checks = [c for c in __import__("iphone_forensics.hardware", fromlist=["battery_checks"]).battery_checks(report)
-              if "cycle" in c.question.lower()]
+    checks = [
+        c
+        for c in __import__(
+            "iphone_forensics.hardware", fromlist=["battery_checks"]
+        ).battery_checks(report)
+        if "cycle" in c.question.lower()
+    ]
     # First-seen wins, but both candidates remain visible in report evidence.
     assert any(c.measurement is not None for c in checks)
 
 
 # ----------------------------------------------------------------- subprocess reliability
+
 
 def test_run_command_times_out_hanging_process():
     if sys.platform == "win32":
@@ -129,22 +140,34 @@ def test_run_command_preserves_nonzero_exit_meaning():
 
 SENSITIVE = "SERIALTOPSECRET1234"
 
+
 def _report_with_sensitive():
     return {
-        "version": "4.0.0", "started_at": "now", "finished_at": "later",
+        "version": "4.0.0",
+        "started_at": "now",
+        "finished_at": "later",
         "host": {"platform": "test", "macOS": "", "python": "3", "architecture": "arm64"},
         "target_udid": "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
         "connected_devices": ["AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"],
         "device": {"SerialNumber": SENSITIVE, "ProductType": "iPhone15,4"},
-        "collection": [{"name": "cmd", "command": ["tool", "-u", "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"],
-                        "status": "success"}],
-        "findings": [], "tools": {}, "limitations": [],
-        "assessment": {}, "buyer_data": template(),
+        "collection": [
+            {
+                "name": "cmd",
+                "command": ["tool", "-u", "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"],
+                "status": "success",
+            }
+        ],
+        "findings": [],
+        "tools": {},
+        "limitations": [],
+        "assessment": {},
+        "buyer_data": template(),
     }
 
 
 def test_redaction_masks_in_html_and_json(tmp_path: Path):
     from iphone_forensics.reporting import finalize
+
     report = _report_with_sensitive()
     finalize(tmp_path, report, redact_identifiers=True)
     for name in ("report-redacted.json", "report-redacted.html"):
@@ -155,6 +178,7 @@ def test_redaction_masks_in_html_and_json(tmp_path: Path):
 
 def test_private_report_keeps_full_identifiers(tmp_path: Path):
     from iphone_forensics.reporting import finalize
+
     report = _report_with_sensitive()
     finalize(tmp_path, report, redact_identifiers=True)
     assert SENSITIVE in (tmp_path / "report.json").read_text()
@@ -162,11 +186,18 @@ def test_private_report_keeps_full_identifiers(tmp_path: Path):
 
 def test_html_escapes_findings_and_device_fields(tmp_path: Path):
     report = {
-        "version": "4.0.0", "started_at": "n", "finished_at": "n",
+        "version": "4.0.0",
+        "started_at": "n",
+        "finished_at": "n",
         "host": {"platform": "t", "macOS": "", "python": "3", "architecture": "arm"},
         "device": {"DeviceName": "<script>x</script>"},
-        "findings": [{"severity": "INFO", "title": "<img src=x onerror=alert(1)>", "detail": "<b>"}],
-        "collection": [], "tools": {}, "limitations": [], "assessment": {},
+        "findings": [
+            {"severity": "INFO", "title": "<img src=x onerror=alert(1)>", "detail": "<b>"}
+        ],
+        "collection": [],
+        "tools": {},
+        "limitations": [],
+        "assessment": {},
         "buyer_data": template(),
     }
     build_html(tmp_path, report)
@@ -177,6 +208,7 @@ def test_html_escapes_findings_and_device_fields(tmp_path: Path):
 
 def test_manifest_v4_schema_roundtrip_after_finalize(tmp_path: Path):
     from iphone_forensics.reporting import finalize
+
     report = _report_with_sensitive()
     finalize(tmp_path, report)  # no redaction
     # v3 finalize writes a list manifest; v4 verify must accept it.

@@ -1,6 +1,9 @@
-from pathlib import Path
-
-from iphone_forensics.hardware import assess_hardware, battery_checks, storage_checks, manual_subsystem_checks
+from iphone_forensics.hardware import (
+    assess_hardware,
+    battery_checks,
+    manual_subsystem_checks,
+    storage_checks,
+)
 from iphone_forensics.integrity import assess_integrity, classify_change
 
 
@@ -36,8 +39,9 @@ def test_battery_missing_is_not_tested_never_pass():
 
 
 def test_storage_normalization():
-    report = _report_with([], device={"TotalDiskCapacity": 128_000_000_000,
-                                      "TotalDataCapacity": 119_000_000_000})
+    report = _report_with(
+        [], device={"TotalDiskCapacity": 128_000_000_000, "TotalDataCapacity": 119_000_000_000}
+    )
     check = storage_checks(report)[0]
     assert check.measurement == 128.0
     assert check.status == "pass_with_warnings"
@@ -46,8 +50,9 @@ def test_storage_normalization():
 
 
 def test_storage_inconsistency_flags_review():
-    report = _report_with([], device={"TotalDiskCapacity": 100_000_000_000,
-                                      "TotalDataCapacity": 120_000_000_000})
+    report = _report_with(
+        [], device={"TotalDiskCapacity": 100_000_000_000, "TotalDataCapacity": 120_000_000_000}
+    )
     consistency = storage_checks(report)[1]
     assert consistency.status == "degraded"
     assert consistency.severity == "WARNING"
@@ -61,9 +66,10 @@ def test_manual_checks_exist_and_require_hands_on():
 
 
 def test_full_assessment_structure():
-    report = _report_with([{"source": "GasGauge", "key": "CycleCount", "value": "203"}],
-                          device={"TotalDiskCapacity": 128_000_000_000,
-                                  "TotalDataCapacity": 119_000_000_000})
+    report = _report_with(
+        [{"source": "GasGauge", "key": "CycleCount", "value": "203"}],
+        device={"TotalDiskCapacity": 128_000_000_000, "TotalDataCapacity": 119_000_000_000},
+    )
     assessment = assess_hardware(report)
     assert "battery" in assessment["subsystems"]
     assert "storage" in assessment["subsystems"]
@@ -75,13 +81,15 @@ def test_full_assessment_structure():
 def test_thermal_panic_becomes_inconclusive_not_fail():
     report = _report_with([], panic=[{"panicString": "thermal pressure event on cpu0"}])
     assessment = assess_hardware(report)
-    thermal = [c for c in assessment["checks"]
-               if c["subsystem"] == "thermal" and "panic" in c["source"]]
+    thermal = [
+        c for c in assessment["checks"] if c["subsystem"] == "thermal" and "panic" in c["source"]
+    ]
     assert thermal, "thermal panic should produce a thermal check"
     assert thermal[0]["status"] == "inconclusive"
 
 
 # ------------------------------------------------------------------ integrity
+
 
 def test_classify_serial_change_is_suspicious_blocker():
     classification, finding = classify_change("SerialNumber", "A", "B")

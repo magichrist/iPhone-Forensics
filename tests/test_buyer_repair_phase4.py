@@ -11,6 +11,7 @@ here, so a *suspicion* about them must never read as a *failure*: an unresolved
 critical item routes to INVESTIGATE_FURTHER ("go check this"), while only a
 recorded `fail` condemns to AVOID_PURCHASE.
 """
+
 import pytest
 
 from iphone_forensics.buyer import (
@@ -31,7 +32,7 @@ NONCRITICAL_IDS = [item["id"] for item in CHECKLIST if not item["critical"]]
 def _answered(status: str = "pass", critical: bool = True) -> dict:
     """A checklist whose relevant items are answered, everything else untouched."""
     data = template()
-    for check_id in (CRITICAL_IDS if critical else NONCRITICAL_IDS):
+    for check_id in CRITICAL_IDS if critical else NONCRITICAL_IDS:
         data["checks"][check_id]["status"] = status
     return data
 
@@ -46,11 +47,11 @@ def _with(**overrides: str) -> dict:
 
 def _clean() -> dict:
     """Every item answered `pass` — the only input reaching rule 5."""
-    return _answered() | {"checks": {i: {"status": "pass"} for i in
-                                     CRITICAL_IDS + NONCRITICAL_IDS}}
+    return _answered() | {"checks": {i: {"status": "pass"} for i in CRITICAL_IDS + NONCRITICAL_IDS}}
 
 
 # ------------------------------------------------------------ rule order / verdict
+
 
 def test_rule1_critical_fail_verdict_is_avoid_purchase():
     data = _answered()
@@ -106,20 +107,28 @@ def test_rule5_clean_checklist_verdict_is_good_candidate():
 def test_every_verdict_in_enum_is_reachable():
     """The enum advertises exactly five outcomes; each is produced by a case."""
     reached = {
-        evaluate_v4(_with(activation_lock="fail"))["verdict"],                    # rule 1
-        evaluate_v4(template())["verdict"],                                      # rule 2
-        evaluate_v4(_answered() | {"checks": {**_answered()["checks"],           # rule 3
-            "battery_health": {"status": "pass"},
-            "cameras": {"status": "pass"},
-            "audio": {"status": "pass"},
-            "carrier_eligibility": {"status": "not_tested"}}})["verdict"],
-        evaluate_v4(_with(display_touch="fail"))["verdict"],                     # rule 4
-        evaluate_v4(_clean())["verdict"],                                        # rule 5
+        evaluate_v4(_with(activation_lock="fail"))["verdict"],  # rule 1
+        evaluate_v4(template())["verdict"],  # rule 2
+        evaluate_v4(
+            _answered()
+            | {
+                "checks": {
+                    **_answered()["checks"],  # rule 3
+                    "battery_health": {"status": "pass"},
+                    "cameras": {"status": "pass"},
+                    "audio": {"status": "pass"},
+                    "carrier_eligibility": {"status": "not_tested"},
+                }
+            }
+        )["verdict"],
+        evaluate_v4(_with(display_touch="fail"))["verdict"],  # rule 4
+        evaluate_v4(_clean())["verdict"],  # rule 5
     }
     assert reached == set(BUYER_VERDICTS)
 
 
 # ------------------------------------------------------------------ status handling
+
 
 def test_invalid_status_is_coerced_to_not_tested_not_pass_and_not_fail():
     data = _answered()
@@ -172,9 +181,14 @@ def test_good_candidate_carries_non_certification_disclaimer():
 
 # ------------------------------------------------------------------ ownership honesty
 
+
 def test_ownership_manual_covers_the_four_critical_ownership_checks():
-    assert set(OWNERSHIP_MANUAL) == {"activation_lock", "remote_management",
-                                     "carrier_eligibility", "icloud_signout"}
+    assert set(OWNERSHIP_MANUAL) == {
+        "activation_lock",
+        "remote_management",
+        "carrier_eligibility",
+        "icloud_signout",
+    }
     assert set(OWNERSHIP_MANUAL) == set(CRITICAL_IDS)
 
 
@@ -192,6 +206,7 @@ def test_ownership_ids_are_all_marked_critical_in_checklist():
 
 
 # ------------------------------------------------------------------ json export
+
 
 def test_evaluate_v4_json_is_evaluate_v4_plus_checklist_version():
     data = _answered()
@@ -211,13 +226,25 @@ def test_evaluate_v4_json_does_not_mutate_or_alias_the_engine_result():
 
 # ------------------------------------------------------------------ repair case export
 
+
 def test_case_to_json_shape():
-    case = new_case("CASE-4", device_hint="iPhone 12", customer_symptoms="no charge",
-                    authorized_scope="repair-and-return")
+    case = new_case(
+        "CASE-4",
+        device_hint="iPhone 12",
+        customer_symptoms="no charge",
+        authorized_scope="repair-and-return",
+    )
     record_work(case, "charging port flex", part_source="OEM", notes="replaced")
     payload = case_to_json(case)
-    assert set(payload) == {"case_id", "status", "device_hint", "symptoms",
-                            "authorized_scope", "work_performed", "qa"}
+    assert set(payload) == {
+        "case_id",
+        "status",
+        "device_hint",
+        "symptoms",
+        "authorized_scope",
+        "work_performed",
+        "qa",
+    }
     assert payload["case_id"] == "CASE-4"
     assert payload["status"] == "open"
     assert payload["device_hint"] == "iPhone 12"
@@ -253,6 +280,7 @@ def test_case_to_json_carries_no_raw_report_paths_or_notes():
 
 # ------------------------------------------------------------------ QA roll-up
 
+
 def test_qa_ready_for_customer_requires_all_fourteen_checks_pass():
     case = new_case("CASE-4")
     summary = qa_summary(case)
@@ -268,8 +296,9 @@ def test_qa_single_unfinished_check_withholds_ready_for_customer(broken):
     case = new_case("CASE-4")
     for check in case["qa_checks"]:
         case["qa_checks"][check] = "pass"
-    case["qa_checks"]["Customer-reported symptoms individually re-tested "
-                          "and resolved or documented"] = broken
+    case["qa_checks"][
+        "Customer-reported symptoms individually re-tested and resolved or documented"
+    ] = broken
     summary = qa_summary(case)
     assert summary["ready_for_customer"] is False
     assert summary[broken if broken == "not_tested" else "fail"] == 1

@@ -21,6 +21,7 @@ QA roll-up). It is shop-internal working state — it is *not* a redaction step,
 so a case export must not be treated as customer-safe on its own. Redaction
 lives in ``reporting.finalize(..., redact_identifiers=True)``.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -48,8 +49,12 @@ QA_CHECKS = [
 ]
 
 
-def new_case(case_id: str, device_hint: str = "", customer_symptoms: str = "",
-             authorized_scope: str = "diagnostics-only") -> dict[str, Any]:
+def new_case(
+    case_id: str,
+    device_hint: str = "",
+    customer_symptoms: str = "",
+    authorized_scope: str = "diagnostics-only",
+) -> dict[str, Any]:
     return {
         "schema_version": "4.0.0",
         "case_id": case_id,
@@ -57,10 +62,10 @@ def new_case(case_id: str, device_hint: str = "", customer_symptoms: str = "",
         "device_hint": device_hint,
         "customer_reported_symptoms": customer_symptoms,
         "authorized_scope": authorized_scope,
-        "pre_repair_baseline": None,       # path to a report.json
-        "work_performed": [],              # [{part, part_source, replaced_at, notes}]
+        "pre_repair_baseline": None,  # path to a report.json
+        "work_performed": [],  # [{part, part_source, replaced_at, notes}]
         "technician_notes": "",
-        "post_repair_report": None,        # path to a report.json
+        "post_repair_report": None,  # path to a report.json
         "qa_checks": {check: "not_tested" for check in QA_CHECKS},
         "comparison": None,
         "status": "open",
@@ -71,6 +76,7 @@ def load_or_create(case_path: Path, case_id: str = "", **kwargs: Any) -> dict[st
     if case_path.exists():
         try:
             import json
+
             data = json.loads(case_path.read_text(encoding="utf-8"))
             if isinstance(data, dict) and data.get("schema_version"):
                 return data
@@ -79,23 +85,28 @@ def load_or_create(case_path: Path, case_id: str = "", **kwargs: Any) -> dict[st
     return new_case(case_id or case_path.stem, **kwargs)
 
 
-def record_work(case: dict[str, Any], part: str, part_source: str = "",
-                notes: str = "") -> None:
-    case["work_performed"].append({
-        "part": part, "part_source": part_source,
-        "recorded_at": dt.datetime.now(dt.UTC).isoformat(),
-        "notes": notes,
-    })
+def record_work(case: dict[str, Any], part: str, part_source: str = "", notes: str = "") -> None:
+    case["work_performed"].append(
+        {
+            "part": part,
+            "part_source": part_source,
+            "recorded_at": dt.datetime.now(dt.UTC).isoformat(),
+            "notes": notes,
+        }
+    )
 
 
 def compare_pre_post(case: dict[str, Any]) -> dict[str, Any]:
     """Integrity comparison between the pre-repair baseline and post-repair report."""
     pre_path, post_path = case.get("pre_repair_baseline"), case.get("post_repair_report")
     if not pre_path or not post_path:
-        return {"status": "incomplete",
-                "note": "Both a pre-repair baseline and a post-repair report are required."}
+        return {
+            "status": "incomplete",
+            "note": "Both a pre-repair baseline and a post-repair report are required.",
+        }
     try:
         import json
+
         pre = json.loads(Path(pre_path).expanduser().read_text(encoding="utf-8"))
         post = json.loads(Path(post_path).expanduser().read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:

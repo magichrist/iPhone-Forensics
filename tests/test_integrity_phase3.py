@@ -19,6 +19,7 @@ constructed through `classify_assertion()`, which enforces the evidence rules:
 Hard rule under test: a metadata difference can never yield `replacement_indicated`
 (docs/v4/tampering-indicators.md).
 """
+
 import pytest
 
 from iphone_forensics.integrity import (
@@ -29,21 +30,32 @@ from iphone_forensics.integrity import (
 )
 from iphone_forensics.models import INTEGRITY_CLASSES
 
-V3_REPORT = {"version": "3.0.0",   # no schema_version → treated as v3
-             "device": {"Product Type": "iPhone15,4", "Serial Number": "F2LX9",
-                        "TotalDiskCapacity": "128000000000"}}
-V4_REPORT = {"schema_version": "4.0.0",
-             "device": {"ProductType": "iPhone15,4", "SerialNumber": "F2LX9",
-                        "TotalDiskCapacity": 128000000000}}
+V3_REPORT = {
+    "version": "3.0.0",  # no schema_version → treated as v3
+    "device": {
+        "Product Type": "iPhone15,4",
+        "Serial Number": "F2LX9",
+        "TotalDiskCapacity": "128000000000",
+    },
+}
+V4_REPORT = {
+    "schema_version": "4.0.0",
+    "device": {
+        "ProductType": "iPhone15,4",
+        "SerialNumber": "F2LX9",
+        "TotalDiskCapacity": 128000000000,
+    },
+}
 
 
 # ------------------------------------------------------- schema normalization
+
 
 def test_normalize_resolves_v3_space_key_to_v4():
     device = normalize_device(V3_REPORT)
     assert device["ProductType"] == "iPhone15,4"
     assert device["SerialNumber"] == "F2LX9"
-    assert "Product Type" not in device      # legacy spelling is resolved, not kept
+    assert "Product Type" not in device  # legacy spelling is resolved, not kept
 
 
 def test_normalize_keeps_v4_canonical_key():
@@ -53,25 +65,30 @@ def test_normalize_keeps_v4_canonical_key():
 
 
 def test_normalize_canonical_key_wins_over_legacy_alias():
-    device = normalize_device({"device": {"Product Type": "iPhone9,9",
-                                          "ProductType": "iPhone15,4"}})
+    device = normalize_device(
+        {"device": {"Product Type": "iPhone9,9", "ProductType": "iPhone15,4"}}
+    )
     assert device["ProductType"] == "iPhone15,4"
     assert "Product Type" not in device
 
 
 def test_normalize_missing_schema_version_is_treated_as_v3():
     # No schema_version: legacy keys and string capacities must still resolve.
-    device = normalize_device({"device": {"Product Type": "iPhone15,4",
-                                          "TotalDiskCapacity": "128000000000"}})
+    device = normalize_device(
+        {"device": {"Product Type": "iPhone15,4", "TotalDiskCapacity": "128000000000"}}
+    )
     assert device["ProductType"] == "iPhone15,4"
     assert device["TotalDiskCapacity"] == 128000000000
     assert isinstance(device["TotalDiskCapacity"], int)
 
 
 def test_normalize_capacity_gb_tier_scaled_to_bytes():
-    device = normalize_device({"schema_version": "4.0.0",
-                               "device": {"TotalDiskCapacity": 128,
-                                          "TotalDataCapacity": "119 GB"}})
+    device = normalize_device(
+        {
+            "schema_version": "4.0.0",
+            "device": {"TotalDiskCapacity": 128, "TotalDataCapacity": "119 GB"},
+        }
+    )
     assert device["TotalDiskCapacity"] == 128_000_000_000
     assert device["TotalDataCapacity"] == 119_000_000_000
 
@@ -122,6 +139,7 @@ def test_int_vs_string_and_gb_vs_bytes_capacity_is_not_a_change():
 
 # ------------------------------------------------------------- continuity guard
 
+
 def test_continuity_established_when_hard_identifier_shared():
     prev = {"device": {"ProductType": "iPhone15,4", "SerialNumber": "F2LX9"}}
     curr = {"device": {"ProductType": "iPhone15,4", "SerialNumber": "F2LX9"}}
@@ -147,11 +165,12 @@ def test_continuity_not_detectable_when_no_identifier_recorded():
     curr = {"schema_version": "4.0.0", "device": {"ProductType": "iPhone15,4"}}
     result = assess_integrity(prev, curr)
     assert result["continuity"] == "not_detectable"
-    finding = next(f for f in result["findings"]
-                   if f["title"] == "Device continuity cannot be established")
+    finding = next(
+        f for f in result["findings"] if f["title"] == "Device continuity cannot be established"
+    )
     assert finding["severity"] == "INFO"
     assert finding["classification"] == "not_detectable"
-    assert result["overall"] == "consistent"   # documented: no identifier was recorded
+    assert result["overall"] == "consistent"  # documented: no identifier was recorded
 
 
 def test_continuity_cap_when_identity_recorded_but_unlinkable():
@@ -162,28 +181,33 @@ def test_continuity_cap_when_identity_recorded_but_unlinkable():
     result = assess_integrity(prev, curr)
     assert result["continuity"] == "not_detectable"
     assert result["classifications"]["SerialNumber"] == "inconclusive"
-    assert result["overall"] == "inconclusive"        # capped, not "consistent"
-    finding = next(f for f in result["findings"]
-                   if f["title"] == "Device continuity cannot be established")
+    assert result["overall"] == "inconclusive"  # capped, not "consistent"
+    finding = next(
+        f for f in result["findings"] if f["title"] == "Device continuity cannot be established"
+    )
     assert finding["severity"] == "INFO"
 
 
 def test_continuity_cap_never_downgrades_suspicious_identity_rule():
     prev = {"device": {"ProductType": "iPhone15,4", "SerialNumber": "S-one"}}
-    curr = {"schema_version": "4.0.0",
-            "device": {"ProductType": "iPhone15,4", "SerialNumber": "S-two"}}
+    curr = {
+        "schema_version": "4.0.0",
+        "device": {"ProductType": "iPhone15,4", "SerialNumber": "S-two"},
+    }
     result = assess_integrity(prev, curr)
     assert result["continuity"] == "not_detectable"
-    assert result["overall"] == "suspicious"          # serial-change BLOCKER survives
+    assert result["overall"] == "suspicious"  # serial-change BLOCKER survives
 
 
 # --------------------------------------------------- all nine integrity classes
+
 
 def test_class_verified_from_narrow_claim_with_evidence():
     classification, finding = classify_assertion(
         "verified",
         "Both snapshots report serial F2LX9, matching Settings → General → About",
-        evidence=["raw/device-info.plist", "photo://settings-about.jpg"])
+        evidence=["raw/device-info.plist", "photo://settings-about.jpg"],
+    )
     assert classification == "verified"
     assert finding.classification == "verified"
     assert finding.confidence != "none"
@@ -198,9 +222,10 @@ def test_class_verified_refuses_claim_without_evidence():
 
 
 def test_class_consistent_from_matching_snapshots():
-    result = assess_integrity({"device": {"ProductType": "iPhone15,4"}},
-                              {"schema_version": "4.0.0",
-                               "device": {"ProductType": "iPhone15,4"}})
+    result = assess_integrity(
+        {"device": {"ProductType": "iPhone15,4"}},
+        {"schema_version": "4.0.0", "device": {"ProductType": "iPhone15,4"}},
+    )
     assert result["classifications"]["ProductType"] == "consistent"
     assert result["overall"] == "consistent"
 
@@ -216,34 +241,57 @@ def test_class_replacement_indicated_only_from_diagnostic_assertion():
         "Display listed as replaced with a non-genuine part",
         source="parts_and_service_history",
         evidence=["photo://settings-parts-service-history.jpg"],
-        next_test="Confirm at an authorized service provider before purchase.")
+        next_test="Confirm at an authorized service provider before purchase.",
+    )
     assert classification == "replacement_indicated"
     assert finding.severity in {"WARNING", "BLOCKER", "REVIEW"}
     assert finding.evidence
 
 
-@pytest.mark.parametrize("bad_source", ["metadata_diff", "snapshot_diff", "product_type_changed", ""])
+@pytest.mark.parametrize(
+    "bad_source", ["metadata_diff", "snapshot_diff", "product_type_changed", ""]
+)
 def test_class_replacement_indicated_refuses_non_diagnostic_sources(bad_source):
     with pytest.raises(ValueError):
-        classify_assertion("replacement_indicated", "serial changed", source=bad_source,
-                           evidence=["report.json (previous)"])
+        classify_assertion(
+            "replacement_indicated",
+            "serial changed",
+            source=bad_source,
+            evidence=["report.json (previous)"],
+        )
 
 
 def test_class_replacement_indicated_requires_evidence_artifact():
     with pytest.raises(ValueError):
-        classify_assertion("replacement_indicated", "battery replaced",
-                           source="diagnostic_service", evidence=[])
+        classify_assertion(
+            "replacement_indicated", "battery replaced", source="diagnostic_service", evidence=[]
+        )
 
 
 def test_metadata_diff_never_yields_replacement_indicated():
-    prev = {"device": {"Product Type": "iPhone13,2", "ModelNumber": "MXCT3",
-                       "BuildVersion": "20A362", "TotalDiskCapacity": "64000000000",
-                       "SerialNumber": "AAAAA"}}
-    curr = {"schema_version": "4.0.0",
-            "device": {"ProductType": "iPhone15,4", "ModelNumber": "MTP13",
-                       "BuildVersion": "22B100", "TotalDiskCapacity": 256_000_000_000,
-                       "SerialNumber": "BBBBB"}}
-    buyer = {"buyer": {"advertised_model": "iPhone 15"}, "observations": {"reported_storage_gb": 256}}
+    prev = {
+        "device": {
+            "Product Type": "iPhone13,2",
+            "ModelNumber": "MXCT3",
+            "BuildVersion": "20A362",
+            "TotalDiskCapacity": "64000000000",
+            "SerialNumber": "AAAAA",
+        }
+    }
+    curr = {
+        "schema_version": "4.0.0",
+        "device": {
+            "ProductType": "iPhone15,4",
+            "ModelNumber": "MTP13",
+            "BuildVersion": "22B100",
+            "TotalDiskCapacity": 256_000_000_000,
+            "SerialNumber": "BBBBB",
+        },
+    }
+    buyer = {
+        "buyer": {"advertised_model": "iPhone 15"},
+        "observations": {"reported_storage_gb": 256},
+    }
     result = assess_integrity(prev, curr, buyer_data=buyer)
     assert result["overall"] != "replacement_indicated"
     assert all(c != "replacement_indicated" for c in result["classifications"].values())
@@ -263,8 +311,9 @@ def test_class_inconclusive_from_not_comparable_field():
 
 
 def test_class_not_detectable_from_continuity_guard():
-    result = assess_integrity({"device": {"ProductType": "iPhone15,4"}},
-                              {"device": {"ProductType": "iPhone15,4"}})
+    result = assess_integrity(
+        {"device": {"ProductType": "iPhone15,4"}}, {"device": {"ProductType": "iPhone15,4"}}
+    )
     assert any(f["classification"] == "not_detectable" for f in result["findings"])
     assert result["continuity"] == "not_detectable"
 
@@ -276,8 +325,11 @@ def test_class_not_tested_without_previous_snapshot():
 
 def test_class_unsupported_from_stated_reason():
     classification, finding = classify_assertion(
-        "unsupported", "Apple exposes pairing state only to Apple tooling; this tool cannot answer it.",
-        evidence=["docs/v4/tampering-indicators.md"], confidence="high")
+        "unsupported",
+        "Apple exposes pairing state only to Apple tooling; this tool cannot answer it.",
+        evidence=["docs/v4/tampering-indicators.md"],
+        confidence="high",
+    )
     assert classification == "unsupported"
     assert finding.classification == "unsupported"
     with pytest.raises(ValueError):
@@ -287,25 +339,42 @@ def test_class_unsupported_from_stated_reason():
 def test_all_nine_integrity_classes_are_reachable():
     """One place asserting every class has a real constructor path."""
     reached = set()
-    reached.add(classify_assertion(
-        "verified", "same serial in both snapshots",
-        evidence=["raw/device-info.plist"])[0])
-    reached.add(assess_integrity({"device": {"SerialNumber": "S"}},
-                                 {"device": {"SerialNumber": "S"}})["overall"])  # consistent
-    reached.add(classify_change("BuildVersion", "21A329", "21B101")[0])          # change_detected
-    reached.add(classify_assertion(
-        "replacement_indicated", "display replaced", source="parts_and_service_history",
-        evidence=["photo://parts.jpg"])[0])
-    reached.add(classify_change("SerialNumber", "A", "B")[0])                     # suspicious
-    reached.add(assess_integrity({"device": {}},
-                                 {"device": {"ProductType": "iPhone15,4"}}
-                                 )["classifications"]["ProductType"])             # inconclusive
-    reached.add(assess_integrity({"device": {"ProductType": "iPhone15,4"}},
-                                 {"device": {"ProductType": "iPhone15,4"}}
-                                 )["findings"][0]["classification"])              # not_detectable
-    reached.add(assess_integrity(None, V4_REPORT)["overall"])                    # not_tested
-    reached.add(classify_assertion(
-        "unsupported", "tool chain cannot answer this", evidence=["docs/v4/x.md"])[0])
+    reached.add(
+        classify_assertion(
+            "verified", "same serial in both snapshots", evidence=["raw/device-info.plist"]
+        )[0]
+    )
+    reached.add(
+        assess_integrity({"device": {"SerialNumber": "S"}}, {"device": {"SerialNumber": "S"}})[
+            "overall"
+        ]
+    )  # consistent
+    reached.add(classify_change("BuildVersion", "21A329", "21B101")[0])  # change_detected
+    reached.add(
+        classify_assertion(
+            "replacement_indicated",
+            "display replaced",
+            source="parts_and_service_history",
+            evidence=["photo://parts.jpg"],
+        )[0]
+    )
+    reached.add(classify_change("SerialNumber", "A", "B")[0])  # suspicious
+    reached.add(
+        assess_integrity({"device": {}}, {"device": {"ProductType": "iPhone15,4"}})[
+            "classifications"
+        ]["ProductType"]
+    )  # inconclusive
+    reached.add(
+        assess_integrity(
+            {"device": {"ProductType": "iPhone15,4"}}, {"device": {"ProductType": "iPhone15,4"}}
+        )["findings"][0]["classification"]
+    )  # not_detectable
+    reached.add(assess_integrity(None, V4_REPORT)["overall"])  # not_tested
+    reached.add(
+        classify_assertion(
+            "unsupported", "tool chain cannot answer this", evidence=["docs/v4/x.md"]
+        )[0]
+    )
 
     assert reached == set(INTEGRITY_CLASSES)
     assert len(INTEGRITY_CLASSES) == 9
@@ -313,10 +382,17 @@ def test_all_nine_integrity_classes_are_reachable():
 
 # ----------------------------------------------------------------- output shape
 
+
 def test_output_shape_unchanged_plus_continuity_key():
     result = assess_integrity(V3_REPORT, V4_REPORT, buyer_data={"buyer": {}, "observations": {}})
-    assert set(result) == {"overall", "continuity", "classifications", "changes",
-                           "findings", "disclaimer"}
+    assert set(result) == {
+        "overall",
+        "continuity",
+        "classifications",
+        "changes",
+        "findings",
+        "disclaimer",
+    }
     assert isinstance(result["classifications"], dict)
     assert isinstance(result["changes"], list)
     assert isinstance(result["findings"], list)

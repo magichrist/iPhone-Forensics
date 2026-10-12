@@ -8,6 +8,7 @@ mounts these subcommands and layers the four-command facade on top.
 Zero new runtime dependencies. Each command has a real, documented purpose and
 works without a connected device where that is meaningful.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -60,8 +61,8 @@ CWD_OUTPUT_MARKER = "<current-working-directory>"
 
 # Stable exit codes so automation can branch on them reliably.
 EXIT_OK = 0
-EXIT_FINDINGS = 1       # completed, but review-worthy findings exist
-EXIT_CONFIG = 2         # user/tool configuration problem
+EXIT_FINDINGS = 1  # completed, but review-worthy findings exist
+EXIT_CONFIG = 2  # user/tool configuration problem
 EXIT_NO_DEVICE = 3
 EXIT_AMBIGUOUS_DEVICE = 4
 
@@ -85,8 +86,16 @@ EXIT_AMBIGUOUS_DEVICE = 4
 # partial run is already reported as `EXIT_FINDINGS` (1) plus explicit
 # `evidence_gap` statuses in the report, which is the honest signal.
 
-SENSITIVE_KEYS = {"SerialNumber", "InternationalMobileEquipmentIdentity", "UniqueDeviceID",
-                  "UDID", "WiFiAddress", "BluetoothAddress", "IMEI", "IntegratedCircuitCardIdentity"}
+SENSITIVE_KEYS = {
+    "SerialNumber",
+    "InternationalMobileEquipmentIdentity",
+    "UniqueDeviceID",
+    "UDID",
+    "WiFiAddress",
+    "BluetoothAddress",
+    "IMEI",
+    "IntegratedCircuitCardIdentity",
+}
 REDACTED = "••••"
 
 
@@ -104,6 +113,7 @@ def _tool_path(name: str) -> str | None:
 
 
 # ------------------------------------------------------------ configuration
+
 
 class ConfigError(Exception):
     """Missing or invalid configuration file — surfaced as EXIT_CONFIG."""
@@ -200,8 +210,7 @@ def set_default_timeout(timeout: int) -> None:
         collectors.save_result.__defaults__ = (timeout,)
 
 
-def _apply_config(args: argparse.Namespace, config: dict[str, Any],
-                  sources: list[Path]) -> None:
+def _apply_config(args: argparse.Namespace, config: dict[str, Any], sources: list[Path]) -> None:
     """Apply the effective config to the parsed args; explicit CLI flags still win."""
     args.config_data = config
     # --output parses with argparse.SUPPRESS, so the attribute exists only when
@@ -235,13 +244,16 @@ def _apply_config(args: argparse.Namespace, config: dict[str, Any],
         try:
             timeout = int(raw_timeout)
         except (TypeError, ValueError):
-            print(f"config: ignoring non-numeric subprocess_timeout_seconds_default "
-                  f"{raw_timeout!r}", file=sys.stderr)
+            print(
+                f"config: ignoring non-numeric subprocess_timeout_seconds_default {raw_timeout!r}",
+                file=sys.stderr,
+            )
         else:
             set_default_timeout(timeout)
 
 
 # ---------------------------------------------------------------- welcome
+
 
 def _device_count_summary(tools_available: bool) -> str:
     """Best-effort, redacted device count for the welcome screen. Never raises."""
@@ -258,14 +270,12 @@ def _device_count_summary(tools_available: bool) -> str:
     return f"{len(devices)} detected (UDIDs redacted here; report files keep full values)"
 
 
-
-
-
 # The no-subcommand welcome is `cli._welcome`: with the two CLIs merged there is
 # exactly one binary and exactly one welcome screen.
 
 
 # ---------------------------------------------------------------- commands
+
 
 def _probe_version(path: str) -> str:
     """Best-effort version string from a tool's --help first line. Never raises."""
@@ -290,11 +300,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     pmd = shutil.which("pymobiledevice3")
     mvt = shutil.which("mvt-ios")
 
-    print(f"libimobiledevice tools: {'available' if lbd else 'NOT FOUND (brew install libimobiledevice)'}")
+    print(
+        f"libimobiledevice tools: {'available' if lbd else 'NOT FOUND (brew install libimobiledevice)'}"
+    )
     for name, path in tools.items():
         print(f"  {name:<22} {'✓ ' + path if path else '—'}")
     print(f"pymobiledevice3:        {'✓ ' + pmd if pmd else '— not installed (optional)'}")
-    print(f"mvt-ios:                {'✓ ' + mvt if mvt else '— not installed (optional, for backup triage)'}")
+    print(
+        f"mvt-ios:                {'✓ ' + mvt if mvt else '— not installed (optional, for backup triage)'}"
+    )
 
     # Output writability + free space on the resolved output root (default CWD).
     output_root = Path(getattr(args, "output", None) or Path.cwd()).expanduser().resolve()
@@ -310,7 +324,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     # Tool versions via --help probe (never execute device commands).
     ideviceinfo = shutil.which("ideviceinfo")
-    print(f"ideviceinfo version:     {_probe_version(ideviceinfo) if ideviceinfo else 'unknown version'}")
+    print(
+        f"ideviceinfo version:     {_probe_version(ideviceinfo) if ideviceinfo else 'unknown version'}"
+    )
     print(f"pymobiledevice3 version: {_probe_version(pmd) if pmd else 'unknown version'}")
 
     devices: list[str] = []
@@ -328,7 +344,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             print(f"device discovery probe failed: {exc}")
     print(f"\nDevice discovery: {'none detected' if not devices else f'{len(devices)} device(s)'}")
     for i, udid in enumerate(devices, 1):
-        print(f"  {i}. {redact(udid)}   (full value kept private in report files)")
+        print(f"  {i}. {udid}")
 
     mode = "full" if lbd else ("partial (pymobiledevice3 only)" if pmd else "offline analysis only")
     print(f"\nOperational mode: {mode}")
@@ -353,22 +369,30 @@ def cmd_devices(args: argparse.Namespace) -> int:
         probe_dir.cleanup()
     if not devices:
         print("No connected device detected.")
-        print("Check: cable carries data (not charge-only), phone unlocked, Trust This Computer approved,")
+        print(
+            "Check: cable carries data (not charge-only), phone unlocked, Trust This Computer approved,"
+        )
         print("`idevice_id -l` and `pymobiledevice3 usbmux list` for native confirmation.")
         return EXIT_NO_DEVICE
     for i, udid in enumerate(devices, 1):
-        print(f"{i}. {redact(udid)}")
+        # Full UDID on the console: this is a local terminal listing hardware the
+        # operator is looking at, and the value is needed to target one device
+        # on the next command. It was previously shown only as a masked tail,
+        # which made it impossible to reuse without digging into report.json.
+        # Shareable artifacts (report-redacted.*) still mask it.
+        print(f"{i}. {udid}")
     if len(devices) == 1:
         print("\nRerun any command with no --device flag to use this phone.")
     else:
-        print("\nMultiple devices detected. Use --device <value> with the full UDID for the intended phone;")
-        print("it is printed unredacted inside the run's report.json.")
+        print("\nMultiple devices detected. Pass --device with the full UDID, a list")
+        print("number, or no value at all to open the interactive selector (↑/↓, Enter).")
     return EXIT_OK
 
 
 def _collect_full(args: argparse.Namespace, run_dir: Path, report: dict[str, Any]) -> None:
     class _BackingArgs:
         """Adapt v4 flags to the v3 collect_device interface without touching v3 code."""
+
         crash_reports = args.crash_reports
         app_list = args.app_list
         provisioning = args.provisioning
@@ -389,12 +413,17 @@ def _collect_full(args: argparse.Namespace, run_dir: Path, report: dict[str, Any
 def cmd_inspect(args: argparse.Namespace) -> int:
     config = getattr(args, "config_data", None) or {}
     syslog_max = int(config.get("syslog_max_seconds", 120))
-    for dest, flag in (("syslog_seconds", "--syslog-seconds"),
-                       ("pmd_syslog_seconds", "--pmd-syslog-seconds")):
+    for dest, flag in (
+        ("syslog_seconds", "--syslog-seconds"),
+        ("pmd_syslog_seconds", "--pmd-syslog-seconds"),
+    ):
         requested = int(getattr(args, dest, 0) or 0)
         if requested > syslog_max:
-            print(f"error: {flag} {requested}s exceeds syslog_max_seconds ({syslog_max}s); "
-                  "raise the limit in the config file", file=sys.stderr)
+            print(
+                f"error: {flag} {requested}s exceeds syslog_max_seconds ({syslog_max}s); "
+                "raise the limit in the config file",
+                file=sys.stderr,
+            )
             return EXIT_CONFIG
 
     buyer_data = buyer_template()
@@ -442,11 +471,17 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     console.stage(1)
     tools_confirmed = any(_tool_path(n) for n in list(LIB_TOOLS) + ["pymobiledevice3"])
     if not tools_confirmed:
-        report["findings"].append({
-            "severity": "BLOCKER", "title": "No supported toolkit detected",
-            "detail": ("Install libimobiledevice (`brew install libimobiledevice`) and/or pymobiledevice3, or run "
-                       "offline analysis with `iphone-forensics inspect --backup-dir <dir>`."),
-            "evidence": []})
+        report["findings"].append(
+            {
+                "severity": "BLOCKER",
+                "title": "No supported toolkit detected",
+                "detail": (
+                    "Install libimobiledevice (`brew install libimobiledevice`) and/or pymobiledevice3, or run "
+                    "offline analysis with `iphone-forensics inspect --backup-dir <dir>`."
+                ),
+                "evidence": [],
+            }
+        )
         # first_stage=2: nothing was collected, so this is not a completed run and
         # --no-fail-on-findings must not report it as a success.
         _finish_run(run_dir, report, buyer_data, args, console, first_stage=2)
@@ -459,27 +494,43 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     if args.device:
         udid = args.device
         if devices and udid not in devices:
-            report["findings"].append({"severity": "WARNING",
-                "title": "Requested device not in discovery output",
-                "detail": "May be disconnected, unpaired, or on a transport this probe does not enumerate.",
-                "evidence": [f"{EVIDENCE_DIR_NAME}/connected-devices.txt"]})
+            report["findings"].append(
+                {
+                    "severity": "WARNING",
+                    "title": "Requested device not in discovery output",
+                    "detail": "May be disconnected, unpaired, or on a transport this probe does not enumerate.",
+                    "evidence": [f"{EVIDENCE_DIR_NAME}/connected-devices.txt"],
+                }
+            )
     elif len(devices) == 1:
         udid = devices[0]
     elif not devices:
-        report["findings"].append({"severity": "BLOCKER", "title": "No connected device detected",
-            "detail": "Unlock the iPhone, use a data-capable cable, approve Trust This Computer, retry.",
-            "evidence": [f"{EVIDENCE_DIR_NAME}/connected-devices.txt"]})
+        report["findings"].append(
+            {
+                "severity": "BLOCKER",
+                "title": "No connected device detected",
+                "detail": "Unlock the iPhone, use a data-capable cable, approve Trust This Computer, retry.",
+                "evidence": [f"{EVIDENCE_DIR_NAME}/connected-devices.txt"],
+            }
+        )
         _finish_run(run_dir, report, buyer_data, args, console, first_stage=2)
         print("No device detected. Run `iphone-forensics doctor` to debug.")
         _print_summary(run_dir, report, console)
         return EXIT_NO_DEVICE
     else:
-        report["findings"].append({"severity": "BLOCKER", "title": "Multiple devices detected",
-            "detail": "Rerun with --device <udid> for the intended phone.",
-            "evidence": [f"{EVIDENCE_DIR_NAME}/connected-devices.txt"]})
+        report["findings"].append(
+            {
+                "severity": "BLOCKER",
+                "title": "Multiple devices detected",
+                "detail": "Rerun with --device <udid> for the intended phone.",
+                "evidence": [f"{EVIDENCE_DIR_NAME}/connected-devices.txt"],
+            }
+        )
         _finish_run(run_dir, report, buyer_data, args, console, first_stage=2)
-        print(f"{len(devices)} devices detected — rerun with --device <udid>. "
-              "Full values are kept in this run's report.json.")
+        print(
+            f"{len(devices)} devices detected — rerun with --device <udid>. "
+            "Full values are kept in this run's report.json."
+        )
         _print_summary(run_dir, report, console)
         return EXIT_AMBIGUOUS_DEVICE
     console.stage_done(1)
@@ -497,8 +548,13 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     return _exit_for(report, args)
 
 
-def _inspect_backup(args: argparse.Namespace, run_dir: Path, report: dict[str, Any],
-                    buyer_data: dict[str, Any], console: _Console | None = None) -> None:
+def _inspect_backup(
+    args: argparse.Namespace,
+    run_dir: Path,
+    report: dict[str, Any],
+    buyer_data: dict[str, Any],
+    console: _Console | None = None,
+) -> None:
     """Offline stages 1-2: analyze an existing authorized backup or panic-file dump directory.
 
     Triage (stage 3) deliberately does not happen here: it belongs to
@@ -508,8 +564,14 @@ def _inspect_backup(args: argparse.Namespace, run_dir: Path, report: dict[str, A
     source = Path(args.backup_dir).expanduser().resolve()
     console.stage(1)
     if not source.exists() or not source.is_dir():
-        report["findings"].append({"severity": "BLOCKER", "title": "Backup path unavailable",
-            "detail": f"{source} does not exist or is not a directory.", "evidence": []})
+        report["findings"].append(
+            {
+                "severity": "BLOCKER",
+                "title": "Backup path unavailable",
+                "detail": f"{source} does not exist or is not a directory.",
+                "evidence": [],
+            }
+        )
         return
     report["offline_analysis"] = {"source": str(source), "mode": "existing-backup"}
     console.stage_done(1)
@@ -518,6 +580,7 @@ def _inspect_backup(args: argparse.Namespace, run_dir: Path, report: dict[str, A
     # and SW-256 chain-of-custody cover them. Keep under a bounded per-file cap
     # to avoid runaway copies from huge backup trees (protective, not forensics-lite).
     import shutil as _shutil
+
     console.stage(2)
     copied = 0
     skipped = 0
@@ -527,24 +590,38 @@ def _inspect_backup(args: argparse.Namespace, run_dir: Path, report: dict[str, A
     MAX_FILES = int(cfg.get("offline_evidence_max_files", 2000))
     for path in sorted(source.rglob("*")):
         if copied >= MAX_FILES:
-            report["findings"].append({"severity": "WARNING",
-                "title": "Offline artifact copy truncated",
-                "detail": f"More than {MAX_FILES} candidate artifacts in source; copy stopped early.",
-                "evidence": []})
+            report["findings"].append(
+                {
+                    "severity": "WARNING",
+                    "title": "Offline artifact copy truncated",
+                    "detail": f"More than {MAX_FILES} candidate artifacts in source; copy stopped early.",
+                    "evidence": [],
+                }
+            )
             break
         if not path.is_file():
             continue
         name_lower = path.name.lower()
-        is_candidate = (path.suffix.lower() in {".ips", ".crash", ".panic", ".diag", ".hang", ".synced"}
-                        or any(term in name_lower for term in ("panic", "resetcounter", "watchdog", "jetsam")))
+        is_candidate = path.suffix.lower() in {
+            ".ips",
+            ".crash",
+            ".panic",
+            ".diag",
+            ".hang",
+            ".synced",
+        } or any(term in name_lower for term in ("panic", "resetcounter", "watchdog", "jetsam"))
         if not is_candidate:
             continue
         try:
             if path.stat().st_size > MAX_FILE_BYTES:
-                report["findings"].append({"severity": "INFO",
-                    "title": f"Skipped oversized artifact: {path.name}",
-                    "detail": "Over the 64 MB per-file evidence-copy cap; content remains at the original path.",
-                    "evidence": []})
+                report["findings"].append(
+                    {
+                        "severity": "INFO",
+                        "title": f"Skipped oversized artifact: {path.name}",
+                        "detail": "Over the 64 MB per-file evidence-copy cap; content remains at the original path.",
+                        "evidence": [],
+                    }
+                )
                 skipped += 1
                 continue
             rel_parent = path.relative_to(source).parent
@@ -553,29 +630,49 @@ def _inspect_backup(args: argparse.Namespace, run_dir: Path, report: dict[str, A
             _shutil.copy2(path, dest_dir / path.name)
             copied += 1
         except OSError as exc:
-            report["findings"].append({"severity": "INFO",
-                "title": f"Could not copy artifact: {path.name}",
-                "detail": str(exc), "evidence": []})
+            report["findings"].append(
+                {
+                    "severity": "INFO",
+                    "title": f"Could not copy artifact: {path.name}",
+                    "detail": str(exc),
+                    "evidence": [],
+                }
+            )
             skipped += 1
     # Record the offline copy as a collection step, so report.json and --verbose
     # list the work that actually happened. Per-file skips stay INFO findings:
     # the step itself ran to completion, so it is not a failed collector.
-    report.setdefault("collection", []).append({
-        "name": "offline-artifact-copy", "command": [], "returncode": 0,
-        "duration_seconds": round(time.monotonic() - started, 3), "timed_out": False,
-        "expected_stream_end": False, "stdout_file": "", "stderr_file": "",
-        "stdout_bytes": 0, "stderr_bytes": 0, "status": "collected",
-        "detail": f"{copied} artifact(s) copied from {source}, {skipped} skipped",
-    })
+    report.setdefault("collection", []).append(
+        {
+            "name": "offline-artifact-copy",
+            "command": [],
+            "returncode": 0,
+            "duration_seconds": round(time.monotonic() - started, 3),
+            "timed_out": False,
+            "expected_stream_end": False,
+            "stdout_file": "",
+            "stderr_file": "",
+            "stdout_bytes": 0,
+            "stderr_bytes": 0,
+            "status": "collected",
+            "detail": f"{copied} artifact(s) copied from {source}, {skipped} skipped",
+        }
+    )
 
     mvt = shutil.which("mvt-ios")
     if mvt:
         from .cli import _run_mvt_backup  # reuse the v3 implementation
+
         _run_mvt_backup(str(source), run_dir, run_dir / EVIDENCE_DIR_NAME, report)
     else:
-        report["findings"].append({"severity": "INFO", "title": "MVT not installed",
-            "detail": "Install mvt-ios separately for malicious-indicator scanning of the backup.",
-            "evidence": []})
+        report["findings"].append(
+            {
+                "severity": "INFO",
+                "title": "MVT not installed",
+                "detail": "Install mvt-ios separately for malicious-indicator scanning of the backup.",
+                "evidence": [],
+            }
+        )
     console.stage_done(2)
     console.collectors(report.get("collection", []))
 
@@ -607,8 +704,10 @@ def cmd_integrity(args: argparse.Namespace) -> int:
     if result["changes"]:
         print(f"{'Field':<30} {'Previous':<25} {'Current':<25} Classification")
         for change in result["changes"]:
-            print(f"{change['field']:<30} {str(change['previous'])[:25]:<25} "
-                  f"{str(change['current'])[:25]:<25} {change.get('classification', change.get('status', ''))}")
+            print(
+                f"{change['field']:<30} {str(change['previous'])[:25]:<25} "
+                f"{str(change['current'])[:25]:<25} {change.get('classification', change.get('status', ''))}"
+            )
     else:
         print("No comparable changes between the two reports.")
     print(f"\n{result['disclaimer']}")
@@ -624,8 +723,12 @@ def cmd_evidence_verify(args: argparse.Namespace) -> int:
         print(f"error: path does not exist: {target}", file=sys.stderr)
         return EXIT_CONFIG
     result = verify_manifest(target)
-    if "error" in result and result.get("matched", 0) == 0 and result.get("changed", 0) == 0 \
-            and result.get("missing", 0) == 0:
+    if (
+        "error" in result
+        and result.get("matched", 0) == 0
+        and result.get("changed", 0) == 0
+        and result.get("missing", 0) == 0
+    ):
         print(f"error: {result['error']}", file=sys.stderr)
         return EXIT_CONFIG
     print(f"Verified OK:   {result['matched']}")
@@ -691,6 +794,7 @@ def cmd_case(args: argparse.Namespace) -> int:
     byte-for-byte what it was before.
     """
     from . import repair
+
     json_only = bool(getattr(args, "json", False))
 
     def say(message: str = "") -> None:
@@ -701,7 +805,9 @@ def cmd_case(args: argparse.Namespace) -> int:
 
     if args.add_work:
         part_source = args.part_source or ""
-        repair.record_work(case, part=args.add_work, part_source=part_source, notes=args.work_notes or "")
+        repair.record_work(
+            case, part=args.add_work, part_source=part_source, notes=args.work_notes or ""
+        )
         say(f"Recorded work: {args.add_work}")
     if args.symptoms:
         case["customer_reported_symptoms"] = args.symptoms
@@ -714,8 +820,10 @@ def cmd_case(args: argparse.Namespace) -> int:
     if args.notes:
         case["technician_notes"] = args.notes
     if args.qa:
-        for qa_expr in ([args.qa] if isinstance(args.qa, str) else args.qa):
-            check, status = (qa_expr.split("=", 1) + [""])[:2] if "=" in qa_expr else (qa_expr, "pass")
+        for qa_expr in [args.qa] if isinstance(args.qa, str) else args.qa:
+            check, status = (
+                (qa_expr.split("=", 1) + [""])[:2] if "=" in qa_expr else (qa_expr, "pass")
+            )
             if check in case["qa_checks"]:
                 case["qa_checks"][check] = status
                 say(f"QA: {check} = {status}")
@@ -739,9 +847,11 @@ def cmd_case(args: argparse.Namespace) -> int:
     if args.close:
         case["status"] = "closed"
         summary = repair.qa_summary(case)
-        say(f"Case closed. QA: {summary['pass']}/{summary['total']} pass, "
+        say(
+            f"Case closed. QA: {summary['pass']}/{summary['total']} pass, "
             f"{summary['fail']} fail, {summary['not_tested']} untested. "
-            f"Ready-for-customer: {summary['ready_for_customer']}")
+            f"Ready-for-customer: {summary['ready_for_customer']}"
+        )
 
     repair.save_case(case, case_path)
     say(f"Case saved: {case_path}")
@@ -756,6 +866,7 @@ def cmd_case(args: argparse.Namespace) -> int:
 def cmd_buyer(args: argparse.Namespace) -> int:
     """Evaluate a buyer checklist offline and print the v4 verdict + rule."""
     from .buyer import evaluate_v4, template
+
     data = template()
     if args.checklist_json:
         try:
@@ -782,15 +893,21 @@ def cmd_buyer(args: argparse.Namespace) -> int:
     if result["critical_unknown"]:
         print("Critical checks UNVERIFIED: " + ", ".join(result["critical_unknown"]))
     if result["unresolved_checks_that_could_change_verdict"]:
-        print("Resolve these to change the verdict: "
-              + ", ".join(result["unresolved_checks_that_could_change_verdict"]))
+        print(
+            "Resolve these to change the verdict: "
+            + ", ".join(result["unresolved_checks_that_could_change_verdict"])
+        )
     print(result["certification_disclaimer"])
     if args.json:
         print(json.dumps(result, indent=2, default=str))
     if args.out:
         write_json(Path(args.out).expanduser(), result)
         print(f"Written: {args.out}")
-    return EXIT_OK if result["verdict"] in {"GOOD_CANDIDATE", "BUY_ONLY_AFTER_REPAIR"} else EXIT_FINDINGS
+    return (
+        EXIT_OK
+        if result["verdict"] in {"GOOD_CANDIDATE", "BUY_ONLY_AFTER_REPAIR"}
+        else EXIT_FINDINGS
+    )
 
 
 def cmd_hardware(args: argparse.Namespace) -> int:
@@ -837,20 +954,41 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
         sev = finding.get("severity", "")
         title = finding.get("title", "")
         if sev == "BLOCKER":
-            steps.append(("1. CRITICAL", f"Resolve first: {title}. {finding.get('detail', '')[:200]}"))
+            steps.append(
+                ("1. CRITICAL", f"Resolve first: {title}. {finding.get('detail', '')[:200]}")
+            )
     hardware = report.get("hardware_assessment") or {}
     for check in hardware.get("warnings", []):
-        steps.append(("2. REVIEW", f"{check.get('subsystem')}: {check.get('question')} — {check.get('next_test') or check.get('explanation', '')[:160]}"))
+        steps.append(
+            (
+                "2. REVIEW",
+                f"{check.get('subsystem')}: {check.get('question')} — {check.get('next_test') or check.get('explanation', '')[:160]}",
+            )
+        )
     buyer = (report.get("buyer_data") or {}).get("checks", {})
-    unverified = [cid for cid, entry in buyer.items()
-                  if isinstance(entry, dict) and entry.get("status") == "not_tested"]
+    unverified = [
+        cid
+        for cid, entry in buyer.items()
+        if isinstance(entry, dict) and entry.get("status") == "not_tested"
+    ]
     if unverified:
-        steps.append(("3. MANUAL", "Unverified checklist items remain: " + ", ".join(unverified[:8])
-                      + (" …" if len(unverified) > 8 else "")))
+        steps.append(
+            (
+                "3. MANUAL",
+                "Unverified checklist items remain: "
+                + ", ".join(unverified[:8])
+                + (" …" if len(unverified) > 8 else ""),
+            )
+        )
     triage = report.get("crash_triage") or {}
     if triage.get("panic_or_watchdog_candidate_count"):
-        steps.append(("4. EVIDENCE", f"{triage['panic_or_watchdog_candidate_count']} panic/watchdog artifacts on disk; "
-                      "correlate recurrence and consider professional diagnostics."))
+        steps.append(
+            (
+                "4. EVIDENCE",
+                f"{triage['panic_or_watchdog_candidate_count']} panic/watchdog artifacts on disk; "
+                "correlate recurrence and consider professional diagnostics.",
+            )
+        )
     if not steps:
         print("No outstanding recommended actions in this report.")
         return EXIT_OK
@@ -873,27 +1011,99 @@ _UNSUPPORTED_PHRASES = (
 # anything else touching this table) never crashes on a broken/partial install.
 # Same (item, coverage, source, limits) shape as the matrix rows used below.
 _LEGACY_CAPABILITY_ROWS: list[tuple[str, str, str, str]] = [
-    ("Device identity metadata", "automated", "ideviceinfo (+ pmd3 when installed)",
-     "reported values are not proof of authenticity"),
-    ("Battery cycle count / capacity fields", "partial", "idevicediagnostics GasGauge (device+tool dependent)",
-     "units vary; verify against Settings → Battery Health"),
-    ("Total/data storage capacity", "automated", "ideviceinfo plist fields", "normalized decimal GB"),
-    ("Display / touch quality", "manual", "guided physical test", "software cannot judge pixels or touch"),
-    ("Cameras (all lenses, focus, flash)", "manual", "guided physical test", "software cannot judge image quality"),
-    ("Face ID / Touch ID function", "manual", "guided re-enroll & unlock test", "never extracts biometric data"),
+    (
+        "Device identity metadata",
+        "automated",
+        "ideviceinfo (+ pmd3 when installed)",
+        "reported values are not proof of authenticity",
+    ),
+    (
+        "Battery cycle count / capacity fields",
+        "partial",
+        "idevicediagnostics GasGauge (device+tool dependent)",
+        "units vary; verify against Settings → Battery Health",
+    ),
+    (
+        "Total/data storage capacity",
+        "automated",
+        "ideviceinfo plist fields",
+        "normalized decimal GB",
+    ),
+    (
+        "Display / touch quality",
+        "manual",
+        "guided physical test",
+        "software cannot judge pixels or touch",
+    ),
+    (
+        "Cameras (all lenses, focus, flash)",
+        "manual",
+        "guided physical test",
+        "software cannot judge image quality",
+    ),
+    (
+        "Face ID / Touch ID function",
+        "manual",
+        "guided re-enroll & unlock test",
+        "never extracts biometric data",
+    ),
     ("Audio (mics, speakers, routing)", "manual", "guided voice-memo/playback test", ""),
     ("Buttons/haptics/proximity/sensors", "manual", "guided physical test", ""),
-    ("Wired/wireless charging", "manual + host USB observation", "guided test", "host pairing ≠ charging health"),
+    (
+        "Wired/wireless charging",
+        "manual + host USB observation",
+        "guided test",
+        "host pairing ≠ charging health",
+    ),
     ("Wi-Fi/BT/cellular/GPS/NFC", "manual", "guided tests on-device", ""),
-    ("Thermal events", "partial", "panic-artifact keyword triage", "inconclusive by design; recurrence matters"),
-    ("Crash/panic history", "partial", "crash-report collection + triage", "triage only, not diagnosis"),
-    ("Parts & Service History", "manual", "Settings → General → About", "Apple exposes this only on the device itself"),
-    ("Activation Lock / MDM", "manual", "seller-erase + reactivation test", "not conclusively queryable from a paired Mac"),
-    ("Carrier lock/blacklist", "manual", "carrier or authoritative IMEI check", "distinct from eligibility"),
-    ("Spyware indicators (backup)", "partial", "mvt-ios if installed, user-supplied indicators",
-     "no hit ≠ clean; hit ≠ conviction"),
-    ("Water resistance / opened-before", "not reliably detectable", "—", "no software method supports a claim"),
-    ("Component originality", "not independently verifiable", "—", "no public API exposes pairing state"),
+    (
+        "Thermal events",
+        "partial",
+        "panic-artifact keyword triage",
+        "inconclusive by design; recurrence matters",
+    ),
+    (
+        "Crash/panic history",
+        "partial",
+        "crash-report collection + triage",
+        "triage only, not diagnosis",
+    ),
+    (
+        "Parts & Service History",
+        "manual",
+        "Settings → General → About",
+        "Apple exposes this only on the device itself",
+    ),
+    (
+        "Activation Lock / MDM",
+        "manual",
+        "seller-erase + reactivation test",
+        "not conclusively queryable from a paired Mac",
+    ),
+    (
+        "Carrier lock/blacklist",
+        "manual",
+        "carrier or authoritative IMEI check",
+        "distinct from eligibility",
+    ),
+    (
+        "Spyware indicators (backup)",
+        "partial",
+        "mvt-ios if installed, user-supplied indicators",
+        "no hit ≠ clean; hit ≠ conviction",
+    ),
+    (
+        "Water resistance / opened-before",
+        "not reliably detectable",
+        "—",
+        "no software method supports a claim",
+    ),
+    (
+        "Component originality",
+        "not independently verifiable",
+        "—",
+        "no public API exposes pairing state",
+    ),
 ]
 
 
@@ -907,9 +1117,16 @@ def cmd_capabilities(args: argparse.Namespace) -> int:
     rows: list[tuple[str, str, str, str]] | None = None
     try:
         from .capabilities import get_matrix
-        rows = [(str(row.get("item", "")), str(row.get("coverage", "")),
-                 str(row.get("source", "")), str(row.get("limits", "")))
-                for row in get_matrix()]
+
+        rows = [
+            (
+                str(row.get("item", "")),
+                str(row.get("coverage", "")),
+                str(row.get("source", "")),
+                str(row.get("limits", "")),
+            )
+            for row in get_matrix()
+        ]
     except Exception:  # noqa: BLE001 — a broken matrix must not kill the command
         rows = None
     if not rows:
@@ -919,8 +1136,11 @@ def cmd_capabilities(args: argparse.Namespace) -> int:
     print("-" * 118)
     for item, coverage, source, limit in rows:
         line = f"{item:<52} {coverage:<13} {source}"
-        notes = [phrase for key, phrase in _UNSUPPORTED_PHRASES
-                 if key in item.lower() and phrase not in coverage]
+        notes = [
+            phrase
+            for key, phrase in _UNSUPPORTED_PHRASES
+            if key in item.lower() and phrase not in coverage
+        ]
         if limit and limit != "—":
             notes.append(limit)
         if notes:
@@ -950,14 +1170,18 @@ def cmd_compare(args: argparse.Namespace) -> int:
     else:
         print(f"{'Field':<45} {'Previous':<22} {'Current':<22} Status")
         for change in comparison["changes"]:
-            print(f"{str(change['field'])[:45]:<45} {str(change['previous'])[:22]:<22} "
-                  f"{str(change['current'])[:22]:<22} {change['status']}")
+            print(
+                f"{str(change['field'])[:45]:<45} {str(change['previous'])[:22]:<22} "
+                f"{str(change['current'])[:22]:<22} {change['status']}"
+            )
     print(f"\nIntegrity classification: {integrity['overall']}")
     if integrity.get("continuity"):
         print(f"Device continuity: {integrity['continuity']}")
     print(comparison.get("note", ""))
     if args.out:
-        write_json(Path(args.out).expanduser(), {"field_comparison": comparison, "integrity": integrity})
+        write_json(
+            Path(args.out).expanduser(), {"field_comparison": comparison, "integrity": integrity}
+        )
         print(f"Written: {args.out}")
     return EXIT_OK
 
@@ -1048,8 +1272,10 @@ class _Console:
             print("      ↳ collectors: none ran in this mode")
             return
         for entry in collection:
-            print(f"      ↳ {str(entry.get('name', '?')):<36} "
-                  f"{str(entry.get('status', '?')):<18} {_seconds(entry.get('duration_seconds'))}")
+            print(
+                f"      ↳ {entry.get('name', '?')!s:<36} "
+                f"{entry.get('status', '?')!s:<18} {_seconds(entry.get('duration_seconds'))}"
+            )
 
 
 # Used whenever no console is supplied: progress and timing are suppressed.
@@ -1074,16 +1300,31 @@ def _new_run_dir(args: argparse.Namespace) -> Path:
 
 def _new_report(args: argparse.Namespace) -> dict[str, Any]:
     from .cli import LIMITATIONS  # reuse the canonical v3 limitations list
+
     return {
-        "project": "iPhone Forensics", "schema_version": SCHEMA_VERSION, "version": __version__,
+        "project": "iPhone Forensics",
+        "schema_version": SCHEMA_VERSION,
+        "version": __version__,
         "started_at": dt.datetime.now(dt.UTC).isoformat(),
         "finished_at": None,
-        "host": {"platform": platform.platform(), "macOS": platform.mac_ver()[0],
-                 "python": sys.version.split()[0], "architecture": platform.machine()},
-        "tools": {name: shutil.which(name) for name in list(LIB_TOOLS) + ["pymobiledevice3", "mvt-ios"]},
-        "target_udid": None, "connected_devices": [], "device": {}, "collection": [],
-        "findings": [], "limitations": LIMITATIONS, "buyer_data": buyer_template(),
-        "hardware_assessment": None, "integrity_assessment": None,
+        "host": {
+            "platform": platform.platform(),
+            "macOS": platform.mac_ver()[0],
+            "python": sys.version.split()[0],
+            "architecture": platform.machine(),
+        },
+        "tools": {
+            name: shutil.which(name) for name in list(LIB_TOOLS) + ["pymobiledevice3", "mvt-ios"]
+        },
+        "target_udid": None,
+        "connected_devices": [],
+        "device": {},
+        "collection": [],
+        "findings": [],
+        "limitations": LIMITATIONS,
+        "buyer_data": buyer_template(),
+        "hardware_assessment": None,
+        "integrity_assessment": None,
         "scope": {
             "read_only": True,
             # Whether sensitive collection was allowed for THIS run, and why.
@@ -1096,9 +1337,15 @@ def _new_report(args: argparse.Namespace) -> dict[str, Any]:
             "sensitive_collection": _sensitive_consent_state(args),
             "sensitive_collection_items": list(getattr(args, "sensitive_explicit", []) or []),
             "backup_requested": getattr(args, "backup", "none") != "none",
-            "logs_requested": bool(getattr(args, "syslog_seconds", 0) or getattr(args, "pmd_syslog_seconds", 0)),
-            "crash_reports_requested": bool(getattr(args, "crash_reports", False) or getattr(args, "pmd_crash_reports", False)),
-            "app_inventory_requested": bool(getattr(args, "app_list", False) or getattr(args, "pmd_app_list", False)),
+            "logs_requested": bool(
+                getattr(args, "syslog_seconds", 0) or getattr(args, "pmd_syslog_seconds", 0)
+            ),
+            "crash_reports_requested": bool(
+                getattr(args, "crash_reports", False) or getattr(args, "pmd_crash_reports", False)
+            ),
+            "app_inventory_requested": bool(
+                getattr(args, "app_list", False) or getattr(args, "pmd_app_list", False)
+            ),
         },
     }
 
@@ -1133,18 +1380,28 @@ def _triage_crash_artifacts(run_dir: Path, report: dict[str, Any]) -> dict[str, 
     # Offline-only: a device run reports pulled crash artifacts through its
     # collection entries and the hardware engine, not through this finding.
     if report.get("offline_analysis") and triage["panic_or_watchdog_candidate_count"]:
-        report.setdefault("findings", []).append({
-            "severity": "REVIEW",
-            "title": "Panic/watchdog candidate artifacts in supplied backup directory",
-            "detail": (f"{triage['panic_or_watchdog_candidate_count']} candidates. Triage only, not a hardware "
-                       f"diagnosis; correlate recurrence and consult professional diagnostics."),
-            "evidence": [i["path"] for i in triage["panic_candidates"][:10]]})
+        report.setdefault("findings", []).append(
+            {
+                "severity": "REVIEW",
+                "title": "Panic/watchdog candidate artifacts in supplied backup directory",
+                "detail": (
+                    f"{triage['panic_or_watchdog_candidate_count']} candidates. Triage only, not a hardware "
+                    f"diagnosis; correlate recurrence and consult professional diagnostics."
+                ),
+                "evidence": [i["path"] for i in triage["panic_candidates"][:10]],
+            }
+        )
     return triage
 
 
-def _finish_run(run_dir: Path, report: dict[str, Any], buyer_data: dict[str, Any],
-                args: argparse.Namespace, console: _Console | None = None,
-                first_stage: int = 3) -> None:
+def _finish_run(
+    run_dir: Path,
+    report: dict[str, Any],
+    buyer_data: dict[str, Any],
+    args: argparse.Namespace,
+    console: _Console | None = None,
+    first_stage: int = 3,
+) -> None:
     """Triage → assessment → report: the closing stages of a run.
 
     `console` is optional — omitted (library and test callers) the stages are
@@ -1168,11 +1425,23 @@ def _finish_run(run_dir: Path, report: dict[str, Any], buyer_data: dict[str, Any
                 # included — because `derive_findings` preserves what is already
                 # on the list.
             else:
-                report["findings"].append({"severity": "WARNING",
-                    "title": "Comparison input is not a JSON object", "detail": "", "evidence": []})
+                report["findings"].append(
+                    {
+                        "severity": "WARNING",
+                        "title": "Comparison input is not a JSON object",
+                        "detail": "",
+                        "evidence": [],
+                    }
+                )
         except (OSError, json.JSONDecodeError) as exc:
-            report["findings"].append({"severity": "WARNING",
-                "title": "Previous report could not be loaded", "detail": str(exc), "evidence": []})
+            report["findings"].append(
+                {
+                    "severity": "WARNING",
+                    "title": "Previous report could not be loaded",
+                    "detail": str(exc),
+                    "evidence": [],
+                }
+            )
 
     if first_stage < 3:
         console.stage(2)
@@ -1189,8 +1458,10 @@ def _finish_run(run_dir: Path, report: dict[str, Any], buyer_data: dict[str, Any
     report["findings"] = derive_findings(report, buyer_data)
     if report.get("integrity_assessment"):
         report["findings"].extend(
-            f for f in report["integrity_assessment"]["findings"]
-            if f.get("classification") in {"suspicious", "change_detected", "replacement_indicated"})
+            f
+            for f in report["integrity_assessment"]["findings"]
+            if f.get("classification") in {"suspicious", "change_detected", "replacement_indicated"}
+        )
     console.stage_done(4)
 
     console.stage(5)
@@ -1199,13 +1470,16 @@ def _finish_run(run_dir: Path, report: dict[str, Any], buyer_data: dict[str, Any
     # left on disk, and a README written afterwards would verify as "added since
     # hashing" — the run dir would never reach a clean verification.
     argv = list(getattr(sys, "argv", []) or [])
-    write_readme_txt(run_dir, {
-        "version": __version__,
-        "generated": report.get("started_at"),
-        "finished": report.get("finished_at"),
-        "device": report.get("device") if isinstance(report.get("device"), dict) else None,
-        "command": " ".join([PROGRAM, *argv[1:]]) if len(argv) > 1 else None,
-    })
+    write_readme_txt(
+        run_dir,
+        {
+            "version": __version__,
+            "generated": report.get("started_at"),
+            "finished": report.get("finished_at"),
+            "device": report.get("device") if isinstance(report.get("device"), dict) else None,
+            "command": " ".join([PROGRAM, *argv[1:]]) if len(argv) > 1 else None,
+        },
+    )
     build_manifest(run_dir)
     console.stage_done(5)
 
@@ -1238,10 +1512,14 @@ def _manual_subsystems(hardware: dict[str, Any]) -> set[str]:
     for check in hardware.get("checks", []) or []:
         if isinstance(check, dict):
             seen.setdefault(str(check.get("subsystem", "")), []).append(
-                str(check.get("question", "")))
+                str(check.get("question", ""))
+            )
     for name, questions in seen.items():
-        if name and questions and all(
-                q.lower().startswith("manual guided test") for q in questions):
+        if (
+            name
+            and questions
+            and all(q.lower().startswith("manual guided test") for q in questions)
+        ):
             manual.add(name)
     return manual
 
@@ -1266,8 +1544,11 @@ def _print_summary(run_dir: Path, report: dict[str, Any], console: _Console | No
     if console is not None and console.quiet:
         print(f"Run:      {run_dir}")
         print(f"Report:   {run_dir / 'report.html'}")
-        print(f"Findings: {len(findings)} ({_findings_breakdown(findings)})"
-              if findings else "Findings: 0")
+        print(
+            f"Findings: {len(findings)} ({_findings_breakdown(findings)})"
+            if findings
+            else "Findings: 0"
+        )
         return
 
     hardware = report.get("hardware_assessment", {})
@@ -1275,8 +1556,11 @@ def _print_summary(run_dir: Path, report: dict[str, Any], console: _Console | No
     print(f"HTML report:  {run_dir / 'report.html'}")
     print(f"JSON data:    {run_dir / 'report.json'}")
     print(f"Manifest:     {run_dir / 'manifest.json'}")
-    print(f"Findings:     {len(findings)} ({_findings_breakdown(findings)})"
-          if findings else "Findings:     0")
+    print(
+        f"Findings:     {len(findings)} ({_findings_breakdown(findings)})"
+        if findings
+        else "Findings:     0"
+    )
     subs = hardware.get("subsystems", {})
     if subs:
         # A subsystem listed as not_tested is ambiguous: it can mean "this tool
@@ -1286,15 +1570,16 @@ def _print_summary(run_dir: Path, report: dict[str, Any], console: _Console | No
         # nothing, because the manual-test placeholders dominate the list.
         # They are split so the automated result is legible at a glance.
         manual = _manual_subsystems(hardware)
-        automated = {name: status for name, status in subs.items()
-                     if name not in manual}
+        automated = {name: status for name, status in subs.items() if name not in manual}
         if automated:
             print("\nHardware subsystem statuses:")
             for name, status in automated.items():
                 print(f"  {name:<22} {status}")
         if manual:
-            print(f"\nNot software-verifiable — manual checks a buyer must do by hand "
-                  f"({len(manual)}):")
+            print(
+                f"\nNot software-verifiable — manual checks a buyer must do by hand "
+                f"({len(manual)}):"
+            )
             print("  " + ", ".join(sorted(manual)))
             print("  Run `iphone-forensics manual-tests` for the guided script.")
     warnings = len(hardware.get("warnings", []))
@@ -1304,6 +1589,7 @@ def _print_summary(run_dir: Path, report: dict[str, Any], console: _Console | No
 
 
 # ------------------------------------------------------------------- parser
+
 
 class _NullParser:
     """Stand-in returned by :func:`add_subcommands` for a command the caller owns.
@@ -1319,10 +1605,10 @@ class _NullParser:
     def set_defaults(self, **kwargs: Any) -> None:
         return None
 
-    def add_mutually_exclusive_group(self, *args: Any, **kwargs: Any) -> "_NullParser":
+    def add_mutually_exclusive_group(self, *args: Any, **kwargs: Any) -> _NullParser:
         return self
 
-    def add_argument_group(self, *args: Any, **kwargs: Any) -> "_NullParser":
+    def add_argument_group(self, *args: Any, **kwargs: Any) -> _NullParser:
         return self
 
 
@@ -1334,6 +1620,7 @@ def add_subcommands(sub: Any, *, skip: frozenset[str] = frozenset()) -> None:
     than the project shipping two CLIs that each declare their own surface.
     ``skip`` lets the caller withhold a command it defines itself.
     """
+
     def add(name: str, **kwargs: Any) -> Any:
         return _NullParser() if name in skip else sub.add_parser(name, **kwargs)
 
@@ -1341,15 +1628,30 @@ def add_subcommands(sub: Any, *, skip: frozenset[str] = frozenset()) -> None:
         """Flags every subcommand accepts, so they work after the subcommand name too."""
         # SUPPRESS defaults: a subparser default would otherwise clobber a value
         # parsed before the subcommand name (argparse namespace reuse).
-        p.add_argument("--output", default=argparse.SUPPRESS,
-                       help="Output root directory (default: the current working directory; "
-                            "config: output_root)")
-        p.add_argument("--config", metavar="PATH", default=argparse.SUPPRESS,
-                       help=f"Load configuration JSON from PATH (default: ./{CONFIG_FILENAME} when present)")
-        p.add_argument("--quiet", action="store_true", default=argparse.SUPPRESS,
-                       help="Suppress progress chatter; print only the summary and errors.")
-        p.add_argument("--verbose", action="store_true", default=argparse.SUPPRESS,
-                       help="Extra detail: per-collector name/status/seconds and stage timing.")
+        p.add_argument(
+            "--output",
+            default=argparse.SUPPRESS,
+            help="Output root directory (default: the current working directory; "
+            "config: output_root)",
+        )
+        p.add_argument(
+            "--config",
+            metavar="PATH",
+            default=argparse.SUPPRESS,
+            help=f"Load configuration JSON from PATH (default: ./{CONFIG_FILENAME} when present)",
+        )
+        p.add_argument(
+            "--quiet",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Suppress progress chatter; print only the summary and errors.",
+        )
+        p.add_argument(
+            "--verbose",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Extra detail: per-collector name/status/seconds and stage timing.",
+        )
 
     p = add("doctor", help="Check toolchain, pairing, and device reachability")
     _common(p)
@@ -1361,26 +1663,58 @@ def add_subcommands(sub: Any, *, skip: frozenset[str] = frozenset()) -> None:
 
     p = add("inspect", help="Full device inspection (device connected or --backup-dir offline)")
     _common(p)
-    p.add_argument("--device", help="Target UDID when multiple devices are connected")
+    p.add_argument(
+        "--device",
+        metavar="UDID",
+        nargs="?",
+        const="",
+        help="Target device: a full UDID, a list number, or given with no "
+        "value to open the interactive selector (↑/↓, Enter)",
+    )
     p.add_argument("--buyer-json", help="Load buyer checklist from JSON")
     p.add_argument("--compare-json", help="Compare against previous report.json")
     p.add_argument("--redact", action="store_true", help="Also write report-redacted.{html,json}")
-    p.add_argument("--backup-dir", help="Offline: analyze an existing authorized backup/evidence directory")
+    p.add_argument(
+        "--backup-dir", help="Offline: analyze an existing authorized backup/evidence directory"
+    )
     p.add_argument("--no-capability-catalog", action="store_true", help="Skip tool help discovery")
-    p.add_argument("--crash-reports", action="store_true", help="Copy/pull crash reports (privacy-sensitive)")
-    p.add_argument("--app-list", action="store_true", help="Collect app inventory (privacy-sensitive)")
+    p.add_argument(
+        "--crash-reports", action="store_true", help="Copy/pull crash reports (privacy-sensitive)"
+    )
+    p.add_argument(
+        "--app-list", action="store_true", help="Collect app inventory (privacy-sensitive)"
+    )
     p.add_argument("--provisioning", action="store_true", help="Collect provisioning profiles")
     p.add_argument("--syslog-seconds", type=int, default=0, help="Bounded live log capture (0-120)")
-    p.add_argument("--pmd-syslog-seconds", type=int, default=0, help="Bounded pmd3 live log capture (0-120)")
-    p.add_argument("--pmd-crash-reports", action="store_true", help="Pull crash reports via pymobiledevice3")
-    p.add_argument("--pmd-processes", action="store_true", help="Process inventory via pymobiledevice3")
+    p.add_argument(
+        "--pmd-syslog-seconds", type=int, default=0, help="Bounded pmd3 live log capture (0-120)"
+    )
+    p.add_argument(
+        "--pmd-crash-reports", action="store_true", help="Pull crash reports via pymobiledevice3"
+    )
+    p.add_argument(
+        "--pmd-processes", action="store_true", help="Process inventory via pymobiledevice3"
+    )
     p.add_argument("--pmd-app-list", action="store_true", help="App list via pymobiledevice3")
-    p.add_argument("--backup", choices=("none", "libimobiledevice", "pymobiledevice3"), default="none",
-                   help="Explicit full backup (potentially sensitive)")
-    p.add_argument("--fail-on-findings", dest="fail_on_findings", action="store_true", default=True,
-                   help="Exit nonzero when REVIEW/WARNING/BLOCKER findings exist (default)")
-    p.add_argument("--no-fail-on-findings", dest="fail_on_findings", action="store_false",
-                   help="Always exit 0 on completed runs regardless of findings")
+    p.add_argument(
+        "--backup",
+        choices=("none", "libimobiledevice", "pymobiledevice3"),
+        default="none",
+        help="Explicit full backup (potentially sensitive)",
+    )
+    p.add_argument(
+        "--fail-on-findings",
+        dest="fail_on_findings",
+        action="store_true",
+        default=True,
+        help="Exit nonzero when REVIEW/WARNING/BLOCKER findings exist (default)",
+    )
+    p.add_argument(
+        "--no-fail-on-findings",
+        dest="fail_on_findings",
+        action="store_false",
+        help="Always exit 0 on completed runs regardless of findings",
+    )
     p.set_defaults(func=cmd_inspect)
 
     p = add("integrity", help="Classify changes between two report snapshots")
@@ -1413,16 +1747,25 @@ def add_subcommands(sub: Any, *, skip: frozenset[str] = frozenset()) -> None:
     p.add_argument("--baseline", help="Path to pre-repair report.json")
     p.add_argument("--post", help="Path to post-repair report.json")
     p.add_argument("--add-work", metavar="PART", help="Record a part replacement or work item")
-    p.add_argument("--part-source", help="Where the part came from (OEM, aftermarket, customer-supplied)")
+    p.add_argument(
+        "--part-source", help="Where the part came from (OEM, aftermarket, customer-supplied)"
+    )
     p.add_argument("--work-notes", help="Notes for the recorded work item")
-    p.add_argument("--qa", metavar="CHECK[=STATUS]", action="append",
-                   help="Set a QA check (repeatable, substring match allowed); STATUS: pass/fail/not_tested")
+    p.add_argument(
+        "--qa",
+        metavar="CHECK[=STATUS]",
+        action="append",
+        help="Set a QA check (repeatable, substring match allowed); STATUS: pass/fail/not_tested",
+    )
     p.add_argument("--compare", action="store_true", help="Run pre/post-repair comparison")
     p.add_argument("--notes", help="Free-form technician notes")
     p.add_argument("--close", action="store_true", help="Mark case closed and print QA summary")
-    p.add_argument("--json", action="store_true",
-                   help="Print the machine-readable case roll-up as JSON on stdout "
-                        "(human progress lines move to stderr for this run)")
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the machine-readable case roll-up as JSON on stdout "
+        "(human progress lines move to stderr for this run)",
+    )
     p.set_defaults(func=cmd_case)
 
     p = add("manual-tests", help="Print the guided manual hardware tests")
@@ -1444,7 +1787,9 @@ def add_subcommands(sub: Any, *, skip: frozenset[str] = frozenset()) -> None:
     p.add_argument("report", help="Path to report.json")
     p.set_defaults(func=cmd_diagnose)
 
-    p = add("capabilities", help="Print the capability matrix: automated/partial/manual/not-verifiable")
+    p = add(
+        "capabilities", help="Print the capability matrix: automated/partial/manual/not-verifiable"
+    )
     p.set_defaults(func=cmd_capabilities)
 
     p = add("compare", help="Field- and integrity-level comparison of two reports")
@@ -1453,8 +1798,11 @@ def add_subcommands(sub: Any, *, skip: frozenset[str] = frozenset()) -> None:
     p.add_argument("--out", help="Write combined comparison JSON here")
     p.set_defaults(func=cmd_compare)
 
-    p = add("config", help="Write or validate the tool configuration "
-                                   "(default output_root: <current-working-directory>)")
+    p = add(
+        "config",
+        help="Write or validate the tool configuration "
+        "(default output_root: <current-working-directory>)",
+    )
     p.add_argument("--check", help="Validate an existing config file")
     p.add_argument("--out", help="Where to write the template (default ./iphone-surgery.json)")
     p.add_argument("--force", action="store_true", help="Overwrite")
@@ -1468,15 +1816,29 @@ def add_global_flags(parser: argparse.ArgumentParser) -> None:
     the two cannot drift. Every one uses ``default=SUPPRESS``: a subparser default
     would otherwise clobber a value parsed before the command name.
     """
-    parser.add_argument("--config", metavar="PATH", default=argparse.SUPPRESS,
-                        help=f"Load configuration JSON from PATH (default: ./{CONFIG_FILENAME} when present)")
-    parser.add_argument("--output", default=argparse.SUPPRESS,
-                        help="Output root directory (default: the current working directory; "
-                             "config: output_root)")
-    parser.add_argument("--quiet", action="store_true", default=argparse.SUPPRESS,
-                        help="Suppress progress chatter; print only the summary and errors.")
-    parser.add_argument("--verbose", action="store_true", default=argparse.SUPPRESS,
-                        help="Extra detail: per-collector name/status/seconds and stage timing.")
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        default=argparse.SUPPRESS,
+        help=f"Load configuration JSON from PATH (default: ./{CONFIG_FILENAME} when present)",
+    )
+    parser.add_argument(
+        "--output",
+        default=argparse.SUPPRESS,
+        help="Output root directory (default: the current working directory; config: output_root)",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Suppress progress chatter; print only the summary and errors.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Extra detail: per-collector name/status/seconds and stage timing.",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1488,18 +1850,23 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog=LEGACY_PROGRAM,
-        description=("Hardware-first iPhone inspection, integrity assessment, and buyer/repair workflows. "
-                     "Safe, read-only by default; works offline against existing backups/evidence."),
-        epilog=("This name is deprecated; use `iphone-forensics` — it accepts every command shown here.\n\n"
-                "Examples:\n"
-                "  iphone-forensics doctor\n"
-                "  iphone-forensics inspect --buyer-json ~/checklist.json\n"
-                "  iphone-forensics integrity --previous old.json --current new.json\n"
-                "  iphone-forensics evidence-verify ./iphone-forensics-20260101-120000\n"
-                "\n"
-                f"Config: ./{CONFIG_FILENAME} is auto-loaded when present; --config PATH overrides it.\n"
-                "Precedence: CLI flag > --config PATH > "
-                f"./{CONFIG_FILENAME} > built-in defaults.\n"))
+        description=(
+            "Hardware-first iPhone inspection, integrity assessment, and buyer/repair workflows. "
+            "Safe, read-only by default; works offline against existing backups/evidence."
+        ),
+        epilog=(
+            "This name is deprecated; use `iphone-forensics` — it accepts every command shown here.\n\n"
+            "Examples:\n"
+            "  iphone-forensics doctor\n"
+            "  iphone-forensics inspect --buyer-json ~/checklist.json\n"
+            "  iphone-forensics integrity --previous old.json --current new.json\n"
+            "  iphone-forensics evidence-verify ./iphone-forensics-20260101-120000\n"
+            "\n"
+            f"Config: ./{CONFIG_FILENAME} is auto-loaded when present; --config PATH overrides it.\n"
+            "Precedence: CLI flag > --config PATH > "
+            f"./{CONFIG_FILENAME} > built-in defaults.\n"
+        ),
+    )
     parser.add_argument("--version", action="version", version=f"{PROGRAM} {__version__}")
     add_global_flags(parser)
     sub = parser.add_subparsers(dest="command")
@@ -1518,9 +1885,11 @@ def main(argv: list[str] | None = None) -> int:
 
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] not in {"--version", "-h", "--help", "--help-advanced"}:
-        print(f"warning: `{LEGACY_PROGRAM}` is deprecated and will be removed. "
-              f"Use `{PROGRAM}` instead — it accepts every command shown here.",
-              file=sys.stderr)
+        print(
+            f"warning: `{LEGACY_PROGRAM}` is deprecated and will be removed. "
+            f"Use `{PROGRAM}` instead — it accepts every command shown here.",
+            file=sys.stderr,
+        )
     return unified_main(argv)
 
 

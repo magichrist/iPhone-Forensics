@@ -1,24 +1,29 @@
 """Spec-section tests: all 9 integrity classes, all health statuses, v4 buyer verdicts, model-aware capability detection."""
-import json
-import urllib.request
-from pathlib import Path
-
-import pytest
 
 from iphone_forensics.buyer import CHECKLIST, evaluate, evaluate_v4, template
 from iphone_forensics.hardware import assess_hardware, battery_checks, storage_checks
 from iphone_forensics.integrity import assess_integrity, classify_change
 
-
 # ---------------------------------------------------------- all 9 integrity classes
 # Spec §4: verified, consistent, change_detected, replacement_indicated,
 # suspicious, inconclusive, not_detectable, not_tested, unsupported.
 
+
 def test_all_nine_integrity_states_are_enumerable():
     from iphone_forensics.models import INTEGRITY_CLASSES
+
     assert len(INTEGRITY_CLASSES) == 9
-    expected = {"verified", "consistent", "change_detected", "replacement_indicated",
-                "suspicious", "inconclusive", "not_detectable", "not_tested", "unsupported"}
+    expected = {
+        "verified",
+        "consistent",
+        "change_detected",
+        "replacement_indicated",
+        "suspicious",
+        "inconclusive",
+        "not_detectable",
+        "not_tested",
+        "unsupported",
+    }
     assert set(INTEGRITY_CLASSES) == expected
 
 
@@ -26,8 +31,9 @@ def test_classify_consistent_when_values_match():
     classification, _ = classify_change("ProductType", "iPhone15,4", "iPhone15,4")
     # identical values never reach classify_change, but the engine records
     # 'consistent' in assess_integrity — verify that instead:
-    result = assess_integrity({"device": {"ProductType": "iPhone15,4"}},
-                              {"device": {"ProductType": "iPhone15,4"}})
+    result = assess_integrity(
+        {"device": {"ProductType": "iPhone15,4"}}, {"device": {"ProductType": "iPhone15,4"}}
+    )
     assert result["classifications"]["ProductType"] == "consistent"
 
 
@@ -83,9 +89,11 @@ def test_no_previous_report_is_not_tested():
 
 def test_not_detectable_exposed_via_capability_matrix():
     # Capability matrix must state what tools cannot answer.
-    from iphone_forensics.cli_v4 import cmd_capabilities
-    import io
     import contextlib
+    import io
+
+    from iphone_forensics.cli_v4 import cmd_capabilities
+
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         exit_code = cmd_capabilities(type("A", (), {"__init__": lambda self: None})())
@@ -96,6 +104,7 @@ def test_not_detectable_exposed_via_capability_matrix():
 
 
 # ---------------------------------------------------------- buyer verdict rules
+
 
 def test_v4_verdict_avoid_purchase_on_critical_fail():
     data = template()
@@ -170,31 +179,45 @@ def test_invalid_checklist_status_treated_as_unknown():
 
 # ---------------------------------------------------------- hardware-health statuses
 
+
 def test_health_status_pass_for_measured_battery():
-    report = {"diagnostic_candidates": [{"source": "GasGauge", "key": "CycleCount", "value": "150"}],
-              "device": {}, "crash_triage": {}}
+    report = {
+        "diagnostic_candidates": [{"source": "GasGauge", "key": "CycleCount", "value": "150"}],
+        "device": {},
+        "crash_triage": {},
+    }
     cycle = next(c for c in battery_checks(report) if "cycle" in c.question.lower())
     assert cycle.status == "pass"
 
 
 def test_health_status_pass_with_warnings_storage():
-    report = {"diagnostic_candidates": [],
-              "device": {"TotalDiskCapacity": 256_000_000_000, "TotalDataCapacity": 240_000_000_000}}
+    report = {
+        "diagnostic_candidates": [],
+        "device": {"TotalDiskCapacity": 256_000_000_000, "TotalDataCapacity": 240_000_000_000},
+    }
     checks = storage_checks(report)
     assert checks[0].status == "pass_with_warnings"
 
 
 def test_health_status_degraded_on_capacity_inconsistency():
-    report = {"diagnostic_candidates": [],
-              "device": {"TotalDiskCapacity": 64_000_000_000, "TotalDataCapacity": 90_000_000_000}}
+    report = {
+        "diagnostic_candidates": [],
+        "device": {"TotalDiskCapacity": 64_000_000_000, "TotalDataCapacity": 90_000_000_000},
+    }
     assert storage_checks(report)[1].status == "degraded"
 
 
 def test_health_status_inconclusive_for_panic_match():
-    report = {"diagnostic_candidates": [], "device": {},
-              "crash_triage": {"panic_candidates": [{"panicString": "thermal runaway"}]}}
-    thermal = [c for c in assess_hardware(report)["checks"]
-               if c["subsystem"] == "thermal" and "panic" in c.get("source", "")]
+    report = {
+        "diagnostic_candidates": [],
+        "device": {},
+        "crash_triage": {"panic_candidates": [{"panicString": "thermal runaway"}]},
+    }
+    thermal = [
+        c
+        for c in assess_hardware(report)["checks"]
+        if c["subsystem"] == "thermal" and "panic" in c.get("source", "")
+    ]
     assert thermal and thermal[0]["status"] == "inconclusive"
 
 
@@ -206,10 +229,18 @@ def test_health_status_not_tested_when_no_evidence_at_all():
 
 def test_health_status_unsupported_exists_in_models():
     from iphone_forensics.models import HEALTH_STATUSES
+
     assert "unsupported" in HEALTH_STATUSES
     assert "fail" in HEALTH_STATUSES
-    assert set(HEALTH_STATUSES) == {"pass", "pass_with_warnings", "degraded", "fail",
-                                    "inconclusive", "not_tested", "unsupported"}
+    assert set(HEALTH_STATUSES) == {
+        "pass",
+        "pass_with_warnings",
+        "degraded",
+        "fail",
+        "inconclusive",
+        "not_tested",
+        "unsupported",
+    }
 
 
 def test_missing_telemetry_never_becomes_pass():
@@ -219,7 +250,9 @@ def test_missing_telemetry_never_becomes_pass():
 
 def test_no_universal_threshold_without_disclosure():
     """Any heuristic threshold must be labeled in the check itself."""
-    report = {"diagnostic_candidates": [{"source": "GasGauge", "key": "CycleCount", "value": "600"}]}
+    report = {
+        "diagnostic_candidates": [{"source": "GasGauge", "key": "CycleCount", "value": "600"}]
+    }
     cycle = next(c for c in battery_checks(report) if "cycle" in c.question.lower())
     # The check must explain its basis, not just claim a number is bad.
     assert any(word in cycle.explanation.lower() for word in ("wear", "compare", "documented"))
@@ -227,17 +260,26 @@ def test_no_universal_threshold_without_disclosure():
 
 # ---------------------------------------------------------- model/iOS capability awareness
 
+
 def test_assessment_reports_ios_applicability_field():
-    check = battery_checks({"diagnostic_candidates": [{"source": "GasGauge", "key": "CycleCount", "value": "150"}]})[0]
+    check = battery_checks(
+        {"diagnostic_candidates": [{"source": "GasGauge", "key": "CycleCount", "value": "150"}]}
+    )[0]
     # model/iOS applicability present in SubsystemCheck
     assert hasattr(check, "model_applicability") and hasattr(check, "ios_applicability")
 
 
 def test_device_identity_extraction_from_plist_dict():
     from iphone_forensics.models import DeviceIdentity
-    identity = DeviceIdentity.from_device_plist({
-        "ProductType": "iPhone15,4", "ProductVersion": "18.0",
-        "SerialNumber": "SER", "TotalDiskCapacity": "128000000000"})
+
+    identity = DeviceIdentity.from_device_plist(
+        {
+            "ProductType": "iPhone15,4",
+            "ProductVersion": "18.0",
+            "SerialNumber": "SER",
+            "TotalDiskCapacity": "128000000000",
+        }
+    )
     assert identity.product_type == "iPhone15,4"
     assert identity.total_disk_capacity == 128000000000
     assert identity.product_version == "18.0"  # first-class field, not in extra

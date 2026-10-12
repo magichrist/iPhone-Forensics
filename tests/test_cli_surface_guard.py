@@ -11,6 +11,7 @@ Current shape:
 These tests run the CLIs as subprocesses (offline, no iPhone) and assert on
 ``--help`` output only, so they are hermetic and device-free.
 """
+
 import argparse
 import os
 import py_compile
@@ -102,8 +103,9 @@ def test_cli_help_lists_facade_commands_and_hides_legacy_collector_flags(tmp_pat
         # --backup-dir offline" — which is documentation, not a leaked option.
         for action in cli._build_parser()._actions:
             if flag in action.option_strings:
-                assert action.help is argparse.SUPPRESS, \
+                assert action.help is argparse.SUPPRESS, (
                     f"legacy flag {flag!r} must stay hidden from --help"
+                )
     advanced = _run_module("iphone_forensics.cli", tmp_path, "--help-advanced")
     assert advanced.returncode == 0, advanced.stderr
     for flag in LEGACY_COLLECTOR_FLAGS:
@@ -115,9 +117,7 @@ def test_v4_help_lists_all_16_subcommands(tmp_path: Path):
     result = _run_module("iphone_forensics.cli_v4", tmp_path, "--help")
     assert result.returncode == 0, result.stderr
     for subcommand in V4_SUBCOMMANDS:
-        assert subcommand in result.stdout, (
-            f"subcommand {subcommand!r} missing from cli_v4 --help"
-        )
+        assert subcommand in result.stdout, f"subcommand {subcommand!r} missing from cli_v4 --help"
 
 
 # P0 guard: update me when the 4-command facade lands (docs/v5/02-cli-redesign.md)

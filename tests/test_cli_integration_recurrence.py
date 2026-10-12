@@ -1,4 +1,5 @@
 """CLI integration, panic recurrence, and v4-schema migration tests (spec §9/§12/§14)."""
+
 import json
 import subprocess
 import sys
@@ -14,10 +15,15 @@ def _run_cli(*argv: str) -> subprocess.CompletedProcess:
     env["PYTHONPATH"] = "src"
     return subprocess.run(
         [sys.executable, "-m", "iphone_forensics.cli_v4", *argv],
-        capture_output=True, text=True, env=env, timeout=60)
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
 
 
 # ------------------------------------------------------- CLI integration (new commands)
+
 
 def test_cli_buyer_verdict_insufficient(tmp_path: Path):
     result = _run_cli("buyer")
@@ -29,9 +35,13 @@ def test_cli_buyer_with_checklist(tmp_path: Path):
     # All critical checks pass and one non-critical fails → rule 4 applies.
     # (With critical unknowns present, rule 3 outranks rule 4 by design —
     # see test_cli_buyer_critical_unknowns_outrank below.)
-    checks = {"battery_health": {"status": "pass"}, "cameras": {"status": "pass"},
-              "physical_damage": {"status": "fail"}}
+    checks = {
+        "battery_health": {"status": "pass"},
+        "cameras": {"status": "pass"},
+        "physical_damage": {"status": "fail"},
+    }
     from iphone_forensics.buyer import CHECKLIST
+
     for item in CHECKLIST:
         if item["critical"]:
             checks[item["id"]] = {"status": "pass"}
@@ -43,9 +53,17 @@ def test_cli_buyer_with_checklist(tmp_path: Path):
 
 def test_cli_buyer_critical_unknowns_outrank_noncritical_failures(tmp_path: Path):
     checklist = tmp_path / "c.json"
-    checklist.write_text(json.dumps({"checks": {
-        "battery_health": {"status": "pass"}, "cameras": {"status": "pass"},
-        "physical_damage": {"status": "fail"}}}))
+    checklist.write_text(
+        json.dumps(
+            {
+                "checks": {
+                    "battery_health": {"status": "pass"},
+                    "cameras": {"status": "pass"},
+                    "physical_damage": {"status": "fail"},
+                }
+            }
+        )
+    )
     result = _run_cli("buyer", "--checklist-json", str(checklist))
     assert "INVESTIGATE_FURTHER" in result.stdout
     assert "buyer.critical_unknowns" in result.stdout
@@ -61,19 +79,39 @@ def test_cli_hardware_on_existing_report(tmp_path: Path):
 
 def test_cli_diagnose_lists_actions(tmp_path: Path):
     report = tmp_path / "r.json"
-    report.write_text(json.dumps({
-        "findings": [{"severity": "BLOCKER", "title": "No toolkit", "detail": "install", "evidence": []}],
-        "hardware_assessment": {"warnings": []},
-        "buyer_data": {"checks": {"battery_health": {"status": "not_tested"}}},
-        "crash_triage": {}}))
+    report.write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "severity": "BLOCKER",
+                        "title": "No toolkit",
+                        "detail": "install",
+                        "evidence": [],
+                    }
+                ],
+                "hardware_assessment": {"warnings": []},
+                "buyer_data": {"checks": {"battery_health": {"status": "not_tested"}}},
+                "crash_triage": {},
+            }
+        )
+    )
     result = _run_cli("diagnose", str(report))
     assert "CRITICAL" in result.stdout and "MANUAL" in result.stdout
 
 
 def test_cli_diagnose_clean_report(tmp_path: Path):
     report = tmp_path / "r.json"
-    report.write_text(json.dumps({"findings": [], "hardware_assessment": {"warnings": []},
-                                  "buyer_data": {"checks": {}}, "crash_triage": {}}))
+    report.write_text(
+        json.dumps(
+            {
+                "findings": [],
+                "hardware_assessment": {"warnings": []},
+                "buyer_data": {"checks": {}},
+                "crash_triage": {},
+            }
+        )
+    )
     result = _run_cli("diagnose", str(report))
     assert "No outstanding" in result.stdout
 
@@ -111,15 +149,22 @@ def test_cli_integrity_exit_code_for_suspicious(tmp_path: Path):
 
 # ------------------------------------------------------- panic recurrence (spec §9)
 
+
 def _make_run_with_panics(tmp_path: Path, count: int = 3) -> Path:
     run = tmp_path / "run"
     ev = run / "raw" / "offline-evidence"
     ev.mkdir(parents=True)
     for i in range(count):
-        (ev / f"panic-full-{i}.ips").write_text(json.dumps({
-            "bug_type": "210", "procName": "kernel",
-            "timestamp": f"2026-01-0{i + 1}T10:00:00Z",
-            "panicString": "WDT timeout"}))
+        (ev / f"panic-full-{i}.ips").write_text(
+            json.dumps(
+                {
+                    "bug_type": "210",
+                    "procName": "kernel",
+                    "timestamp": f"2026-01-0{i + 1}T10:00:00Z",
+                    "panicString": "WDT timeout",
+                }
+            )
+        )
     return run
 
 
@@ -143,8 +188,9 @@ def test_recurrence_with_unknown_timestamp_format(tmp_path: Path):
     ev = run / "raw" / "offline-evidence"
     ev.mkdir(parents=True)
     for i in range(2):
-        (ev / f"watchdog-{i}.ips").write_text(json.dumps(
-            {"bug_type": "283", "procName": "wfd", "timestamp": "garbage-time-format"}))
+        (ev / f"watchdog-{i}.ips").write_text(
+            json.dumps({"bug_type": "283", "procName": "wfd", "timestamp": "garbage-time-format"})
+        )
     triage = analyze_crash_artifacts(run)
     pattern = triage["recurrence"]["repeated_patterns"][0]
     assert pattern["timestamps_unknown"] == 2
@@ -155,27 +201,34 @@ def test_single_artifact_is_not_a_pattern(tmp_path: Path):
     run = tmp_path / "run"
     ev = run / "raw" / "offline-evidence"
     ev.mkdir(parents=True)
-    (ev / "panic-full-0.ips").write_text(json.dumps(
-        {"bug_type": "210", "procName": "kernel", "timestamp": "2026-01-01T10:00:00Z"}))
+    (ev / "panic-full-0.ips").write_text(
+        json.dumps({"bug_type": "210", "procName": "kernel", "timestamp": "2026-01-01T10:00:00Z"})
+    )
     triage = analyze_crash_artifacts(run)
     assert triage["recurrence"]["pattern_count"] == 0
 
 
 def test_recurrence_never_classified_as_diagnosis():
     from iphone_forensics.analysis import _recurrence_analysis
-    items = [{"bug_type": "210", "procName": "kernel", "timestamp": "2026-01-01T10:00:00Z"}
-             for _ in range(5)]
+
+    items = [
+        {"bug_type": "210", "procName": "kernel", "timestamp": "2026-01-01T10:00:00Z"}
+        for _ in range(5)
+    ]
     result = _recurrence_analysis(items, [])
     assert all(p["classification"] == "weak_heuristic_pattern" for p in result["repeated_patterns"])
 
 
 # ------------------------------------------------------- v4 schema + v3 migration (spec §12)
 
+
 def test_report_json_records_schema_version(tmp_path: Path):
     run = tmp_path / "run"
     run.mkdir()
-    from iphone_forensics.cli_v4 import _new_report, _finish_run
     import argparse
+
+    from iphone_forensics.cli_v4 import _finish_run, _new_report
+
     args = argparse.Namespace(redact=False, compare_json=None)
     report = _new_report(args)
     assert report["schema_version"] == "5.0.0"
@@ -188,23 +241,31 @@ def test_report_json_records_schema_version(tmp_path: Path):
 
 def test_integrity_engine_reads_v3_report_without_schema_version(tmp_path: Path):
     """A v3 report (no schema_version key) must be usable as previous/current."""
-    v3 = {"version": "3.0.0", "device": {"ProductType": "iPhone15,4"},
-          "diagnostic_candidates": [], "collection": []}
+    v3 = {
+        "version": "3.0.0",
+        "device": {"ProductType": "iPhone15,4"},
+        "diagnostic_candidates": [],
+        "collection": [],
+    }
     from iphone_forensics.integrity import assess_integrity
-    result = assess_integrity(v3, {"schema_version": "4.0.0",
-                                   "device": {"ProductType": "iPhone15,4"}})
+
+    result = assess_integrity(
+        v3, {"schema_version": "4.0.0", "device": {"ProductType": "iPhone15,4"}}
+    )
     assert result["overall"] == "consistent"
 
 
 def test_partial_collection_report_states_incompleteness(tmp_path: Path):
     """A report whose collection failed must NOT look like a healthy one."""
     report = {
-        "diagnostic_candidates": [], "device": {},
+        "diagnostic_candidates": [],
+        "device": {},
         "crash_triage": {},
         "collection": [{"name": "device-info", "status": "failed_or_partial"}],
     }
-    from iphone_forensics.hardware import assess_hardware
     from iphone_forensics.analysis import automated_assessment
+    from iphone_forensics.hardware import assess_hardware
+
     hardware = assess_hardware(report)
     assessment = automated_assessment(report, None)
     assert hardware["subsystems"]["battery"] == "not_tested"
@@ -227,8 +288,9 @@ def test_single_entry_point_declared():
         for line in scripts_block.splitlines()
         if "=" in line and not line.strip().startswith("#")
     ]
-    assert entry_points == ["iphone-forensics"], \
+    assert entry_points == ["iphone-forensics"], (
         f"expected exactly one console script, found {entry_points}"
+    )
     assert "iphone_surgery = " not in scripts_block, "the retired entry point must not return"
 
 
@@ -254,10 +316,13 @@ def test_unified_cli_accepts_every_engine_subcommand():
 def test_hardware_integration_markers_skip_no_device():
     """Live-device tests: skip cleanly when no libimobiledevice devices exist."""
     import shutil
+
     if not shutil.which("idevice_id"):
         pytest.skip("libimobiledevice not installed")
-    from iphone_forensics.collectors import discover_devices
     from pathlib import Path
+
+    from iphone_forensics.collectors import discover_devices
+
     probe = Path("/tmp/ipt-probe")
     probe.mkdir(mode=0o700, exist_ok=True)
     devices = discover_devices(probe, [])

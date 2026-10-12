@@ -45,6 +45,7 @@ Exit codes (shared with the engine; see `cli_v4`'s decision table):
     0 OK · 1 completed with review-worthy findings · 2 usage/config problem
     3 discovery completed, no device attached · 4 more than one device attached
 """
+
 from __future__ import annotations
 
 import argparse
@@ -97,33 +98,126 @@ MAX_SYSLOG_SECONDS = 120
 #     (flag, is_sensitive, argparse kwargs)
 _COMPAT_FLAGS: tuple[tuple[str, bool, dict[str, Any]], ...] = (
     ("--udid", False, {"dest": "device", "help": "Legacy alias for --device (full UDID)."}),
-    ("--output", False, {"metavar": "DIR", "help": "Output root directory (default: the current working directory)."}),
-    ("--buyer-json", False, {"metavar": "PATH", "help": "Load a buyer checklist/observations JSON file."}),
-    ("--compare-json", False, {"metavar": "PATH", "help": "Also embed an integrity comparison against a previous report.json in this run's report."}),
-    ("--redact-identifiers", False, {"action": "store_true", "help": "Also emit report-redacted.html and report-redacted.json with identifiers masked."}),
-    ("--no-capability-catalog", False, {"action": "store_true", "help": "Skip the help-only tool capability catalog for a faster run."}),
-    ("--init-buyer-checklist", False, {"metavar": "PATH", "help": "Write an editable buyer-checklist JSON template to PATH and exit (overwrites)."}),
+    (
+        "--output",
+        False,
+        {
+            "metavar": "DIR",
+            "help": "Output root directory (default: the current working directory).",
+        },
+    ),
+    (
+        "--buyer-json",
+        False,
+        {"metavar": "PATH", "help": "Load a buyer checklist/observations JSON file."},
+    ),
+    (
+        "--compare-json",
+        False,
+        {
+            "metavar": "PATH",
+            "help": "Also embed an integrity comparison against a previous report.json in this run's report.",
+        },
+    ),
+    (
+        "--redact-identifiers",
+        False,
+        {
+            "action": "store_true",
+            "help": "Also emit report-redacted.html and report-redacted.json with identifiers masked.",
+        },
+    ),
+    (
+        "--no-capability-catalog",
+        False,
+        {
+            "action": "store_true",
+            "help": "Skip the help-only tool capability catalog for a faster run.",
+        },
+    ),
+    (
+        "--init-buyer-checklist",
+        False,
+        {
+            "metavar": "PATH",
+            "help": "Write an editable buyer-checklist JSON template to PATH and exit (overwrites).",
+        },
+    ),
     ("--app-list", True, {"action": "store_true", "help": "Collect installed-app inventory."}),
-    ("--pmd-app-list", True, {"action": "store_true", "help": "Collect installed-app inventory with pymobiledevice3."}),
-    ("--pmd-processes", True, {"action": "store_true", "help": "Collect the running-process inventory with pymobiledevice3."}),
-    ("--crash-reports", True, {"action": "store_true", "help": "Copy crash reports off the device."}),
-    ("--pmd-crash-reports", True, {"action": "store_true", "help": "Pull crash reports with pymobiledevice3."}),
-    ("--provisioning", True, {"action": "store_true", "help": "Collect provisioning-profile inventory."}),
-    ("--syslog-seconds", True, {"type": int, "help": "Bounded libimobiledevice live log capture (0-120 seconds)."}),
-    ("--pmd-syslog-seconds", True, {"type": int, "help": "Bounded pymobiledevice3 live log capture (0-120 seconds)."}),
-    ("--backup", True, {"choices": ("none", "libimobiledevice", "pymobiledevice3"),
-                        "help": "Create a full backup (potentially sensitive); default is none."}),
-    ("--mvt-backup", True, {"metavar": "PATH", "help": "Triage an existing authorized backup directory: offline analysis + mvt-ios check-backup."}),
+    (
+        "--pmd-app-list",
+        True,
+        {"action": "store_true", "help": "Collect installed-app inventory with pymobiledevice3."},
+    ),
+    (
+        "--pmd-processes",
+        True,
+        {
+            "action": "store_true",
+            "help": "Collect the running-process inventory with pymobiledevice3.",
+        },
+    ),
+    (
+        "--crash-reports",
+        True,
+        {"action": "store_true", "help": "Copy crash reports off the device."},
+    ),
+    (
+        "--pmd-crash-reports",
+        True,
+        {"action": "store_true", "help": "Pull crash reports with pymobiledevice3."},
+    ),
+    (
+        "--provisioning",
+        True,
+        {"action": "store_true", "help": "Collect provisioning-profile inventory."},
+    ),
+    (
+        "--syslog-seconds",
+        True,
+        {"type": int, "help": "Bounded libimobiledevice live log capture (0-120 seconds)."},
+    ),
+    (
+        "--pmd-syslog-seconds",
+        True,
+        {"type": int, "help": "Bounded pymobiledevice3 live log capture (0-120 seconds)."},
+    ),
+    (
+        "--backup",
+        True,
+        {
+            "choices": ("none", "libimobiledevice", "pymobiledevice3"),
+            "help": "Create a full backup (potentially sensitive); default is none.",
+        },
+    ),
+    (
+        "--mvt-backup",
+        True,
+        {
+            "metavar": "PATH",
+            "help": "Triage an existing authorized backup directory: offline analysis + mvt-ios check-backup.",
+        },
+    ),
 )
 
 _CONSENT_FLAGS: tuple[tuple[str, dict[str, Any]], ...] = (
-    ("--yes-sensitive", {"action": "store_true",
-                         "help": "Include the sensitive collectors that take no extra argument (app, "
-                                 "process, crash-report, and provisioning inventory). Bounded log capture "
-                                 "and full backups still require their own dedicated flag; see "
-                                 f"`{PROGRAM} --help-advanced`."}),
-    ("--no-sensitive", {"action": "store_true",
-                        "help": "Never prompt and keep every sensitive collector off (automation-safe default)."}),
+    (
+        "--yes-sensitive",
+        {
+            "action": "store_true",
+            "help": "Include the sensitive collectors that take no extra argument (app, "
+            "process, crash-report, and provisioning inventory). Bounded log capture "
+            "and full backups still require their own dedicated flag; see "
+            f"`{PROGRAM} --help-advanced`.",
+        },
+    ),
+    (
+        "--no-sensitive",
+        {
+            "action": "store_true",
+            "help": "Never prompt and keep every sensitive collector off (automation-safe default).",
+        },
+    ),
 )
 
 
@@ -138,19 +232,42 @@ SENSITIVE_DESTS = frozenset(_dest_of(f, s) for f, sens, s in _COMPAT_FLAGS if se
 # no-subcommand invocation keeps working.
 COMPAT_DESTS = frozenset(_dest_of(f, s) for f, _sens, s in _COMPAT_FLAGS)
 
-# Human-readable consent scope, in the order the prompt lists it.
-SENSITIVE_SCOPE: tuple[tuple[str, str], ...] = (
-    ("Installed-app inventory", "--app-list, --pmd-app-list"),
-    ("Running-process inventory", "--pmd-processes"),
-    ("Live system-log capture", "--syslog-seconds, --pmd-syslog-seconds"),
-    ("Crash-report copy / pull", "--crash-reports, --pmd-crash-reports"),
-    ("Provisioning-profile inventory", "--provisioning"),
-    ("Full device backup", "--backup"),
-    ("MVT backup triage", "--mvt-backup"),
+# Human-readable consent scope, in the order the selector lists it.
+# Each entry is (label, flags, argparse dests it enables) so the checkbox menu,
+# the `--yes-sensitive` blanket switch, and the explicit-flag path can never
+# disagree about what a given line actually collects.
+SENSITIVE_SCOPE: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("Installed-app inventory", "--app-list, --pmd-app-list", ("app_list", "pmd_app_list")),
+    ("Running-process inventory", "--pmd-processes", ("pmd_processes",)),
+    (
+        "Live system-log capture",
+        "--syslog-seconds, --pmd-syslog-seconds",
+        ("syslog_seconds", "pmd_syslog_seconds"),
+    ),
+    (
+        "Crash-report copy / pull",
+        "--crash-reports, --pmd-crash-reports",
+        ("crash_reports", "pmd_crash_reports"),
+    ),
+    ("Provisioning-profile inventory", "--provisioning", ("provisioning",)),
+    ("Full device backup", "--backup", ("backup",)),
+    ("MVT backup triage", "--mvt-backup", ("mvt_backup",)),
+)
+
+# Labels that need a value (a duration, a target path) rather than a bare switch.
+# Consent selects them, but the operator still has to supply the argument — the
+# tool never invents a capture window or picks a backup destination.
+SENSITIVE_NEEDS_VALUE: frozenset[str] = frozenset(
+    {
+        "Live system-log capture",
+        "Full device backup",
+        "MVT backup triage",
+    }
 )
 
 
 # --------------------------------------------------------------- small helpers
+
 
 def _given(namespace: argparse.Namespace, dest: str) -> Any:
     """Value of `dest`, or None when the flag was not passed at all.
@@ -182,6 +299,7 @@ def _toolkit_present() -> bool:
 
 # ------------------------------------------------------------ device selection
 
+
 def _probe_devices() -> list[str] | None:
     """Discover attached UDIDs into a throwaway directory.
 
@@ -196,52 +314,26 @@ def _probe_devices() -> list[str] | None:
         return None
 
 
-def _ask_device_and_consent(devices: list[str],
-                            consent: bool | None) -> tuple[str | None, bool | None]:
-    """Ask which device, then consent — in a **single** terminal interaction.
+def _ask_device_and_consent(
+    devices: list[str], consent: bool | None
+) -> tuple[str | None, bool | None]:
+    """Deprecated combined prompt, kept only so imports do not break.
 
-    These were two sequential `input()` calls, so a TTY session with more than
-    one device attached was interrupted twice before any collection started.
-    Both questions now appear before one prompt, and either can be answered by
-    pressing Enter alone: the device defaults to the first, consent to no.
-
-    Returns ``(udid, consent)``; ``(None, ...)`` means the operator cancelled.
+    Device selection and sensitive collection are now two separate interactive
+    widgets — `interactive.choose_device` and `interactive.choose_sensitive` —
+    because a checkbox list cannot share one prompt line with a numbered list.
     """
-    print(f"\n{len(devices)} devices detected.")
-    for index, udid in enumerate(devices, 1):
-        print(f"  {index}. {redact(udid)}")
-    print("  (the full UDID is written to the run's report.json)")
-    print("\nStandard profile is read-only. Consent would additionally collect:")
-    for item, flags in SENSITIVE_SCOPE:
-        print(f"  - {item:<32} ({flags})")
-    try:
-        answer = input(f"Choose 1-{len(devices)} and whether to include sensitive "
-                       f"collection — e.g. `2 y`, or Enter for `1 n`: ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print()
+    from .interactive import choose_device, choose_sensitive
+
+    chosen = choose_device(devices)
+    if chosen is None:
         return None, None
-    if not answer:
-        return devices[0], False
-
-    parts = answer.split()
-    chosen_index = 1
-    granted = consent is True
-    for token in parts:
-        if token.isdigit() and 1 <= int(token) <= len(devices):
-            chosen_index = int(token)
-        elif token in {"y", "yes"}:
-            granted = True
-        elif token in {"n", "no"}:
-            granted = False
-        else:
-            print(f"Ignoring unrecognised input {token!r}.")
-    return devices[chosen_index - 1], granted
-
-
-
+    labels = choose_sensitive(tuple((label, flags) for label, flags, _ in SENSITIVE_SCOPE))
+    return chosen, bool(labels)
 
 
 # ------------------------------------------------------------------- consent
+
 
 def _explicitly_requested(namespace: argparse.Namespace, dest: str) -> bool:
     """Was this sensitive collector actually asked for?
@@ -274,49 +366,86 @@ def _prompt_consent(stream: Any = None) -> bool | None:
     return answer in {"y", "yes"}
 
 
-def _resolve_sensitive(namespace: argparse.Namespace, stream: Any = None) -> tuple[bool, frozenset[str]]:
+def _selected_dests(labels: set[str]) -> frozenset[str]:
+    """Argparse dests enabled by the consent labels the operator ticked."""
+    dests: set[str] = set()
+    for label, _flags, targets in SENSITIVE_SCOPE:
+        if label in labels:
+            dests.update(targets)
+    return frozenset(dests)
+
+
+def _resolve_sensitive(
+    namespace: argparse.Namespace, stream: Any = None
+) -> tuple[bool, frozenset[str]]:
     """Decide the sensitive profile: (consent_for_the_rest, explicitly_requested).
 
     * An explicit collector flag is itself consent **for that collector only**,
       and it also suppresses the prompt, so legacy automation that already names
       a sensitive collector is never interrupted.
-    * ``--yes-sensitive`` turns on the boolean collectors; ``--no-sensitive`` and
-      a declined prompt leave them off; a non-interactive session always leaves
+    * ``--yes-sensitive`` turns on every boolean collector; ``--no-sensitive`` and
+      an empty selection leave them off; a non-interactive session always leaves
       them off and is recorded as ``skipped_by_user``.
-    * Flags that need a duration or a target (``--syslog-seconds``, ``--backup``,
-      ``--mvt-backup``) are never switched on by consent alone — consent never
-      invents a capture window or a backup.
+    * On a TTY the operator gets a **checkbox list** — space toggles, Enter
+      confirms — so they can take exactly the app inventory without also handing
+      over log capture and a backup. An all-or-nothing y/N could not express that.
+    * Dests that need a value (``--syslog-seconds``, ``--backup``, ``--mvt-backup``)
+      are selected but not enabled: consent never invents a capture window or a
+      backup destination, so the operator must still pass the argument.
     """
     explicit = frozenset(dest for dest in SENSITIVE_DESTS if _explicitly_requested(namespace, dest))
     if _flag_value(namespace, "yes_sensitive", False):
-        print("Sensitive collection enabled (--yes-sensitive): app, process, crash-report, and "
-              "provisioning inventory.")
+        print(
+            "Sensitive collection enabled (--yes-sensitive): app, process, crash-report, and "
+            "provisioning inventory."
+        )
         return True, explicit
     if explicit:
-        print("Sensitive collectors explicitly requested: "
-              + ", ".join(sorted(f"--{dest.replace('_', '-')}" for dest in explicit))
-              + " — every other sensitive collector stays off.")
+        print(
+            "Sensitive collectors explicitly requested: "
+            + ", ".join(sorted(f"--{dest.replace('_', '-')}" for dest in explicit))
+            + " — every other sensitive collector stays off."
+        )
         return False, explicit
     if _flag_value(namespace, "no_sensitive", False):
         print("Sensitive collection disabled (--no-sensitive).")
         return False, explicit
-    answer = _prompt_consent(stream)
-    if answer is None:
-        print("Non-interactive session: sensitive collection skipped (status: skipped_by_user). "
-              "Re-run with --yes-sensitive to include it.")
+
+    from .interactive import choose_sensitive
+
+    labels = choose_sensitive(tuple((label, flags) for label, flags, _ in SENSITIVE_SCOPE))
+    if not labels:
+        if not _is_tty(stream):
+            print(
+                "Non-interactive session: sensitive collection skipped "
+                "(status: skipped_by_user). Re-run with --yes-sensitive to include it."
+            )
+        else:
+            print("Sensitive collection not selected; standard read-only profile only.")
         return False, explicit
-    if answer:
-        print("Sensitive collection enabled for this run by consent.")
-        return True, explicit
-    print("Sensitive collection declined; standard read-only profile only.")
-    return False, explicit
+
+    chosen = _selected_dests(labels)
+    needs_value = sorted(label for label in labels if label in SENSITIVE_NEEDS_VALUE)
+    if needs_value:
+        print(
+            "Selected but still needs its argument (nothing was invented for you): "
+            + ", ".join(needs_value)
+        )
+        print("  e.g. --syslog-seconds 30 for log capture, --backup libimobiledevice for a backup.")
+    return True, frozenset(explicit | chosen)
 
 
 # ------------------------------------------------------------ engine delegation
 
-def _engine_args(namespace: argparse.Namespace, *, output: str, device: str | None,
-                 sensitive: bool,
-                 explicit: frozenset[str] = frozenset()) -> argparse.Namespace:
+
+def _engine_args(
+    namespace: argparse.Namespace,
+    *,
+    output: str,
+    device: str | None,
+    sensitive: bool,
+    explicit: frozenset[str] = frozenset(),
+) -> argparse.Namespace:
     """Build the namespace `cli_v4.cmd_inspect` expects.
 
     Only the flags the engine reads are forwarded, so nothing from the v5
@@ -326,8 +455,15 @@ def _engine_args(namespace: argparse.Namespace, *, output: str, device: str | No
     (`--syslog-seconds`, `--backup`, `--mvt-backup`) stay off unless explicitly
     requested, so consent never invents a capture window or a backup.
     """
+
     def boolean(dest: str) -> bool:
-        return bool(_given(namespace, dest)) or sensitive
+        """True when this collector was named on the command line or consented to.
+
+        `sensitive` is the *blanket* consent from `--yes-sensitive`; a partial
+        checkbox selection arrives in `explicit` instead, so this no longer ORs
+        everything into every collector when a single item was ticked.
+        """
+        return bool(_given(namespace, dest)) or sensitive or dest in explicit
 
     # Two offline paths reach the engine's `backup_dir`: the engine's own
     # `--backup-dir`, and the facade's legacy `--mvt-backup`. Only the latter was
@@ -337,16 +473,22 @@ def _engine_args(namespace: argparse.Namespace, *, output: str, device: str | No
     backup_dir = _given(namespace, "backup_dir")
     mvt_backup = _given(namespace, "mvt_backup")
     if backup_dir and mvt_backup:
-        print("error: --backup-dir and --mvt-backup both select the offline path; "
-              "pass only one.", file=sys.stderr)
+        print(
+            "error: --backup-dir and --mvt-backup both select the offline path; pass only one.",
+            file=sys.stderr,
+        )
         backup_dir = mvt_backup = None
     offline_dir = backup_dir or mvt_backup
     if mvt_backup:
-        print(f"--mvt-backup {mvt_backup}: running the offline backup path (artifact triage + mvt-ios "
-              "check-backup). No device collection runs for this path.")
+        print(
+            f"--mvt-backup {mvt_backup}: running the offline backup path (artifact triage + mvt-ios "
+            "check-backup). No device collection runs for this path."
+        )
     elif backup_dir:
-        print(f"--backup-dir {backup_dir}: running the offline evidence path. "
-              "No device collection runs for this path.")
+        print(
+            f"--backup-dir {backup_dir}: running the offline evidence path. "
+            "No device collection runs for this path."
+        )
     return argparse.Namespace(
         output=output,
         device=device,
@@ -381,15 +523,22 @@ def _validate_capture_bounds(namespace: argparse.Namespace) -> int | None:
         try:
             seconds = int(value)
         except (TypeError, ValueError):
-            print(f"error: --{dest.replace('_', '-')} must be a whole number of seconds", file=sys.stderr)
+            print(
+                f"error: --{dest.replace('_', '-')} must be a whole number of seconds",
+                file=sys.stderr,
+            )
             return EXIT_CONFIG
         if not 0 <= seconds <= MAX_SYSLOG_SECONDS:
-            print(f"error: --{dest.replace('_', '-')} must be between 0 and {MAX_SYSLOG_SECONDS}", file=sys.stderr)
+            print(
+                f"error: --{dest.replace('_', '-')} must be between 0 and {MAX_SYSLOG_SECONDS}",
+                file=sys.stderr,
+            )
             return EXIT_CONFIG
     return None
 
 
 # ----------------------------------------------------------------- commands
+
 
 def _run_inspect(namespace: argparse.Namespace, output: str) -> int:
     """`inspect`: select a device, resolve consent, delegate to the engine."""
@@ -410,8 +559,9 @@ def _run_inspect(namespace: argparse.Namespace, output: str) -> int:
     offline = bool(_given(namespace, "backup_dir") or _given(namespace, "mvt_backup"))
     if offline:
         sensitive, explicit = False, frozenset()
-        return cmd_inspect(_engine_args(namespace, output=output, device=None,
-                                        sensitive=False, explicit=explicit))
+        return cmd_inspect(
+            _engine_args(namespace, output=output, device=None, sensitive=False, explicit=explicit)
+        )
     if not device:
         devices = _probe_devices()
         if devices is None:
@@ -419,34 +569,33 @@ def _run_inspect(namespace: argparse.Namespace, output: str) -> int:
         elif not devices:
             if _toolkit_present():
                 print("No connected device detected.")
-                print("Next: `iphone-forensics doctor` — checks the cable, pairing, and Trust prompt.")
+                print(
+                    "Next: `iphone-forensics doctor` — checks the cable, pairing, and Trust prompt."
+                )
             else:
                 print("No supported iOS toolkit detected.")
-                print("Next: `iphone-forensics doctor` — prints install instructions for "
-                      "libimobiledevice and/or pymobiledevice3.")
+                print(
+                    "Next: `iphone-forensics doctor` — prints install instructions for "
+                    "libimobiledevice and/or pymobiledevice3."
+                )
             # Handled by the engine so the run still leaves a BLOCKER report and
             # returns EXIT_NO_DEVICE, exactly like the pre-v5 flow.
-        elif len(devices) == 1:
-            pass  # single device: the engine auto-selects it
-        elif not _is_tty():
-            print(f"{len(devices)} devices are connected and this session is not interactive.")
-            print("Next: `iphone-forensics devices` to list them, then re-run "
-                  "`iphone-forensics inspect --device <udid>`.")
-            # The engine sees the same ambiguity and returns EXIT_AMBIGUOUS_DEVICE.
-        else:
-            # One prompt covering both questions, so a TTY session with several
-            # devices attached is interrupted once rather than twice.
-            explicit = frozenset(dest for dest in SENSITIVE_DESTS
-                                 if _explicitly_requested(namespace, dest))
-            # `consent=None` means "ask, as part of the single prompt" — it must
-            # not itself print the scope, or the list appears twice.
-            chosen, granted = _ask_device_and_consent(devices, None)
+        elif _is_tty():
+            # An interactive selector even for a single device: it shows the full
+            # UDID (so it can be reused) and lets the operator confirm rather than
+            # silently inspecting whatever happens to be plugged in.
+            from .interactive import choose_device
+
+            chosen = choose_device(devices)
             if chosen is None:
                 print("No device selected; nothing was inspected.")
                 return EXIT_AMBIGUOUS_DEVICE
             device = chosen
-            return _dispatch_inspect(namespace, output, device, granted, explicit,
-                                     announce=True)
+        else:
+            print(f"{len(devices)} device(s) connected and this session is not interactive.")
+            for index, udid in enumerate(devices, 1):
+                print(f"  {index}. {udid}")
+            print("Using the first. Pass --device <udid> to choose another.")
 
     sensitive, explicit = _resolve_sensitive(namespace)
     return _dispatch_inspect(namespace, output, device, sensitive, explicit)
@@ -468,8 +617,7 @@ def _looks_like_udid(value: str) -> bool:
     turning every real UDID into a usage error.
     """
     compact = str(value).strip().lower()
-    if compact.startswith("udid-"):
-        compact = compact[5:]
+    compact = compact.removeprefix("udid-")
     compact = compact.replace("-", "")
     if len(compact) < 8 or not all(char in "0123456789abcdef" for char in compact):
         return False
@@ -488,7 +636,22 @@ def _resolve_device_argument(namespace: argparse.Namespace) -> int | None:
     rejected with the actual UDIDs listed when the input is not a device at all.
     """
     raw = _flag_value(namespace, "device")
-    if not raw:
+    if raw is None:
+        return None
+    if str(raw).strip() == "":
+        # `--device` with no value means "let me pick". nargs="?" on the flag
+        # makes this an explicit request for the selector rather than a typo.
+        from .interactive import choose_device
+
+        devices = _probe_devices() or []
+        if not devices:
+            print("error: --device was given but no device is attached.", file=sys.stderr)
+            print("Next: `iphone-forensics doctor`.", file=sys.stderr)
+            return EXIT_NO_DEVICE
+        chosen = choose_device(devices)
+        if chosen is None:
+            return EXIT_AMBIGUOUS_DEVICE
+        _set_device(namespace, chosen)
         return None
     device = str(raw).strip()
     if _looks_like_udid(device):
@@ -499,34 +662,52 @@ def _resolve_device_argument(namespace: argparse.Namespace) -> int | None:
         devices = _probe_devices() or []
         index = int(device)
         if devices and 1 <= index <= len(devices):
-            print(f"--device {device} resolved to device {index} of {len(devices)}: "
-                  f"{redact(devices[index - 1])}")
+            print(
+                f"--device {device} resolved to device {index} of {len(devices)}: "
+                f"{redact(devices[index - 1])}"
+            )
             _set_device(namespace, devices[index - 1])
             return None
-        listing = "\n".join(f"  {n}. {redact(u)}" for n, u in enumerate(devices, 1)) \
+        listing = (
+            "\n".join(f"  {n}. {redact(u)}" for n, u in enumerate(devices, 1))
             or "  (no devices detected — run `iphone-forensics doctor`)"
-        print(f"error: --device {device!r} is not a device number in range and not a UDID.",
-              file=sys.stderr)
+        )
+        print(
+            f"error: --device {device!r} is not a device number in range and not a UDID.",
+            file=sys.stderr,
+        )
         print(f"Connected devices:\n{listing}", file=sys.stderr)
-        print("Pass a UDID (Settings → General → About → Serial Number), or omit "
-              "--device to select interactively.", file=sys.stderr)
+        print(
+            "Pass a UDID (Settings → General → About → Serial Number), or omit "
+            "--device to select interactively.",
+            file=sys.stderr,
+        )
         return EXIT_CONFIG
 
     print(f"error: --device {device!r} is not a UDID.", file=sys.stderr)
-    print("A UDID is the device's Serial Number as shown in "
-          "Settings → General → About, or the last 8 characters of it.", file=sys.stderr)
+    print(
+        "A UDID is the device's Serial Number as shown in "
+        "Settings → General → About, or the last 8 characters of it.",
+        file=sys.stderr,
+    )
     return EXIT_CONFIG
 
 
 def _set_device(namespace: argparse.Namespace, udid: str) -> None:
     """Record the resolved UDID on the namespace under every name it is read by."""
-    setattr(namespace, "device", udid)
-    setattr(namespace, "udid", udid)
+    namespace.device = udid
+    namespace.udid = udid
 
 
-def _dispatch_inspect(namespace: argparse.Namespace, output: str, device: str | None,
-                      sensitive: bool, explicit: frozenset[str],
-                      *, announce: bool = False) -> int:
+def _dispatch_inspect(
+    namespace: argparse.Namespace,
+    output: str,
+    device: str | None,
+    sensitive: bool,
+    explicit: frozenset[str],
+    *,
+    announce: bool = False,
+) -> int:
     """Hand the resolved device and consent decision to the engine.
 
     `announce` is False for the `_resolve_sensitive` path, which has already
@@ -539,21 +720,30 @@ def _dispatch_inspect(namespace: argparse.Namespace, output: str, device: str | 
         if sensitive:
             print("Sensitive collection enabled for this run by consent.")
         elif granted_explicitly := explicit:
-            print("Sensitive collectors explicitly requested: "
-                  + ", ".join(sorted(f"--{dest.replace('_', '-')}" for dest in granted_explicitly))
-                  + " — every other sensitive collector stays off.")
+            print(
+                "Sensitive collectors explicitly requested: "
+                + ", ".join(sorted(f"--{dest.replace('_', '-')}" for dest in granted_explicitly))
+                + " — every other sensitive collector stays off."
+            )
         elif not _is_tty():
-            print("Non-interactive session: sensitive collection skipped "
-                  "(status: skipped_by_user). Re-run with --yes-sensitive to include it.")
+            print(
+                "Non-interactive session: sensitive collection skipped "
+                "(status: skipped_by_user). Re-run with --yes-sensitive to include it."
+            )
         else:
             print("Sensitive collection declined; standard read-only profile only.")
-    return cmd_inspect(_engine_args(namespace, output=output, device=device,
-                                    sensitive=sensitive, explicit=explicit))
+    return cmd_inspect(
+        _engine_args(
+            namespace, output=output, device=device, sensitive=sensitive, explicit=explicit
+        )
+    )
 
 
 def _default_current_report() -> Path | None:
     """Newest `./iphone-forensics-*/report.json` in the working directory."""
-    candidates = [path for path in Path.cwd().glob("iphone-forensics-*/report.json") if path.is_file()]
+    candidates = [
+        path for path in Path.cwd().glob("iphone-forensics-*/report.json") if path.is_file()
+    ]
     if not candidates:
         return None
     return max(candidates, key=lambda path: path.stat().st_mtime)
@@ -561,23 +751,35 @@ def _default_current_report() -> Path | None:
 
 def _run_compare(namespace: argparse.Namespace) -> int:
     # The flag wins if both forms are given, since it is the explicit one.
-    previous = str(_flag_value(namespace, "previous_flag", "")
-                   or _flag_value(namespace, "previous_report", "") or "")
+    previous = str(
+        _flag_value(namespace, "previous_flag", "")
+        or _flag_value(namespace, "previous_report", "")
+        or ""
+    )
     if not previous:
-        print("error: compare needs a previous report.json, given either "
-              "positionally or with --previous", file=sys.stderr)
+        print(
+            "error: compare needs a previous report.json, given either "
+            "positionally or with --previous",
+            file=sys.stderr,
+        )
         return EXIT_CONFIG
     current = _flag_value(namespace, "current")
     if not current:
         current = _default_current_report()
         if current is None:
-            print("error: --current was not given and no ./iphone-forensics-*/report.json was found "
-                  "in the current directory", file=sys.stderr)
+            print(
+                "error: --current was not given and no ./iphone-forensics-*/report.json was found "
+                "in the current directory",
+                file=sys.stderr,
+            )
             print("Pass --current <report.json> explicitly.", file=sys.stderr)
             return EXIT_CONFIG
         print(f"Comparing against the newest run in this directory: {current}")
-    return cmd_compare(argparse.Namespace(previous=previous, current=str(current),
-                                          out=_flag_value(namespace, "out")))
+    return cmd_compare(
+        argparse.Namespace(
+            previous=previous, current=str(current), out=_flag_value(namespace, "out")
+        )
+    )
 
 
 def _write_checklist_template(path: str) -> int:
@@ -587,6 +789,7 @@ def _write_checklist_template(path: str) -> int:
 
 # ------------------------------------------------------------------ welcome
 
+
 def _welcome() -> int:
     """No command and no legacy flags: say what this is and what to run next."""
     tools = [name for name in LIB_TOOLS if shutil.which(name)]
@@ -594,10 +797,14 @@ def _welcome() -> int:
     print(f"iphone-forensics v{__version__} — local-first, non-destructive iPhone inspection")
     print()
     if tools or pmd:
-        print(f"Toolchain: {len(tools)}/{len(LIB_TOOLS)} libimobiledevice tools"
-              + ("; pymobiledevice3 available" if pmd else "; pymobiledevice3 not installed"))
+        print(
+            f"Toolchain: {len(tools)}/{len(LIB_TOOLS)} libimobiledevice tools"
+            + ("; pymobiledevice3 available" if pmd else "; pymobiledevice3 not installed")
+        )
     else:
-        print("Toolchain: no iOS toolkit detected — install libimobiledevice and/or pymobiledevice3.")
+        print(
+            "Toolchain: no iOS toolkit detected — install libimobiledevice and/or pymobiledevice3."
+        )
     print("Prerequisites: iPhone unlocked · Trust This Computer approved · data-capable cable.")
     print()
     print("Next:")
@@ -611,6 +818,7 @@ def _welcome() -> int:
 
 
 # ------------------------------------------------------------------- parser
+
 
 def _existing_flags(parser: argparse.ArgumentParser) -> set[str]:
     """Option strings and dests already declared on *parser*."""
@@ -669,21 +877,31 @@ def _add_consent_flags(container: Any, *, hidden: bool) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROGRAM,
-        description=("Local-first, non-destructive iPhone inspection with an HTML buyer report. "
-                     "Four commands; a standard inspection needs no flags."),
-        epilog=("Examples:\n"
-                "  iphone-forensics devices\n"
-                "  iphone-forensics inspect\n"
-                "  iphone-forensics doctor\n"
-                "  iphone-forensics compare ./iphone-forensics-20260101-120000/report.json\n"
-                "\n"
-                "A standard `inspect` run collects everything read-only and leaves sensitive\n"
-                "collection off unless you consent. Advanced/compatibility flags:\n"
-                f"  {PROGRAM} --help-advanced\n"),
-        formatter_class=argparse.RawDescriptionHelpFormatter)
+        description=(
+            "Local-first, non-destructive iPhone inspection with an HTML buyer report. "
+            "Four commands; a standard inspection needs no flags."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  iphone-forensics devices\n"
+            "  iphone-forensics inspect\n"
+            "  iphone-forensics doctor\n"
+            "  iphone-forensics compare ./iphone-forensics-20260101-120000/report.json\n"
+            "\n"
+            "A standard `inspect` run collects everything read-only and leaves sensitive\n"
+            "collection off unless you consent. Advanced/compatibility flags:\n"
+            f"  {PROGRAM} --help-advanced\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--version", action="version", version=f"{PROGRAM} {__version__}")
-    parser.add_argument("--help-advanced", dest="help_advanced", action="store_true",
-                        default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--help-advanced",
+        dest="help_advanced",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
     _add_compat_flags(parser, all_flags=True)
     # Consent flags are hidden here but must work wherever the legacy flags do,
     # so the no-subcommand (pre-v5) invocation stays controllable from a script.
@@ -709,20 +927,31 @@ def _build_parser() -> argparse.ArgumentParser:
     compare = sub.add_parser(
         "compare",
         help="Gap-aware comparison of two report.json snapshots",
-        description=("Classify every field as changed, unchanged, only-in-one-side, or not "
-                     "comparable, and report the integrity/continuity verdict. A missing field "
-                     "on one side is never treated as a device change.\n\n"
-                     "The previous report may be given positionally or with --previous; both "
-                     "forms are accepted because the engine previously required the flag."))
+        description=(
+            "Classify every field as changed, unchanged, only-in-one-side, or not "
+            "comparable, and report the integrity/continuity verdict. A missing field "
+            "on one side is never treated as a device change.\n\n"
+            "The previous report may be given positionally or with --previous; both "
+            "forms are accepted because the engine previously required the flag."
+        ),
+    )
     # Distinct dests on purpose. Sharing one dest looks tidier but silently loses the
     # flag: an unsatisfied `nargs="?"` positional is applied *after* the option,
     # overwriting it with None. So `compare --previous a.json` parsed to None.
-    compare.add_argument("previous_report", metavar="PREVIOUS_REPORT", nargs="?",
-                         help="Earlier run's report.json")
-    compare.add_argument("--previous", metavar="REPORT", dest="previous_flag",
-                         help="Earlier run's report.json (alternative to the positional form)")
-    compare.add_argument("--current", metavar="REPORT",
-                         help="Later run's report.json (default: newest ./iphone-forensics-*/report.json)")
+    compare.add_argument(
+        "previous_report", metavar="PREVIOUS_REPORT", nargs="?", help="Earlier run's report.json"
+    )
+    compare.add_argument(
+        "--previous",
+        metavar="REPORT",
+        dest="previous_flag",
+        help="Earlier run's report.json (alternative to the positional form)",
+    )
+    compare.add_argument(
+        "--current",
+        metavar="REPORT",
+        help="Later run's report.json (default: newest ./iphone-forensics-*/report.json)",
+    )
     compare.add_argument("--out", metavar="PATH", help="Write the combined comparison JSON here")
     compare.set_defaults(func=_run_compare)
 
@@ -748,11 +977,15 @@ def _augment_facade_commands(sub: Any) -> None:
 
 
 def _run_devices(namespace: argparse.Namespace) -> int:
-    return cmd_devices(argparse.Namespace(output=_flag_value(namespace, "output", DEFAULT_OUTPUT_ROOT)))
+    return cmd_devices(
+        argparse.Namespace(output=_flag_value(namespace, "output", DEFAULT_OUTPUT_ROOT))
+    )
 
 
 def _run_doctor(namespace: argparse.Namespace) -> int:
-    return cmd_doctor(argparse.Namespace(output=_flag_value(namespace, "output", DEFAULT_OUTPUT_ROOT)))
+    return cmd_doctor(
+        argparse.Namespace(output=_flag_value(namespace, "output", DEFAULT_OUTPUT_ROOT))
+    )
 
 
 def _run_inspect_command(namespace: argparse.Namespace, output: str | None = None) -> int:
@@ -771,12 +1004,16 @@ def _run_inspect_command(namespace: argparse.Namespace, output: str | None = Non
 _FACADE_AUGMENTED: tuple[tuple[str, Any, bool, str], ...] = (
     ("devices", _run_devices, False, ""),
     ("doctor", _run_doctor, False, ""),
-    ("inspect", _run_inspect_command, True,
-     "Run the standard profile: every non-destructive collector is on and "
-     "sensitive collection is off unless you consent.\n\n"
-     "No flag is needed for a normal inspection. Device selection, output "
-     "location, buyer checklists, redaction, and every legacy collector flag "
-     f"are documented by `{PROGRAM} --help-advanced`."),
+    (
+        "inspect",
+        _run_inspect_command,
+        True,
+        "Run the standard profile: every non-destructive collector is on and "
+        "sensitive collection is off unless you consent.\n\n"
+        "No flag is needed for a normal inspection. Device selection, output "
+        "location, buyer checklists, redaction, and every legacy collector flag "
+        f"are documented by `{PROGRAM} --help-advanced`.",
+    ),
 )
 
 
@@ -799,8 +1036,7 @@ def _engine_subcommands() -> list[tuple[str, str]]:
             # _SubParsersAction records each subcommand's one-line help here.
             entries = getattr(action, "_choices_actions", None)
             if entries:
-                return sorted((str(entry.dest), str(entry.help or ""))
-                              for entry in entries)
+                return sorted((str(entry.dest), str(entry.help or "")) for entry in entries)
         return []
     except Exception:  # noqa: BLE001 - --help must never fail, whatever the engine parser does
         return []
@@ -895,8 +1131,11 @@ def _apply_effective_config(args: argparse.Namespace) -> int | None:
             config, sources = load_config(getattr(args, "config", None))
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        print(f"Fix or remove the file, or point --config at a valid one "
-              f"(validate with `{PROGRAM} config --check <path>`).", file=sys.stderr)
+        print(
+            f"Fix or remove the file, or point --config at a valid one "
+            f"(validate with `{PROGRAM} config --check <path>`).",
+            file=sys.stderr,
+        )
         return EXIT_CONFIG
     _apply_config(args, config, sources)
     if sources and not getattr(args, "quiet", False):
@@ -913,23 +1152,41 @@ def _run_mvt_backup(backup_path: str, run_dir: Path, raw: Path, report: dict[str
     import shutil
 
     from .util import run_command, write_command_result
+
     executable = shutil.which("mvt-ios")
     source = Path(backup_path).expanduser().resolve()
     if not source.exists() or not source.is_dir():
-        report.setdefault("findings", []).append({"severity":"WARNING", "title":"MVT backup path unavailable",
-            "detail":"The supplied path does not exist or is not a directory; no MVT scan was run.", "evidence":[]})
+        report.setdefault("findings", []).append(
+            {
+                "severity": "WARNING",
+                "title": "MVT backup path unavailable",
+                "detail": "The supplied path does not exist or is not a directory; no MVT scan was run.",
+                "evidence": [],
+            }
+        )
         return
     if not executable:
-        report.setdefault("findings", []).append({"severity":"INFO", "title":"MVT not installed",
-            "detail":"Install Mobile Verification Toolkit (mvt-ios) separately to scan an existing authorized backup.", "evidence":[]})
+        report.setdefault("findings", []).append(
+            {
+                "severity": "INFO",
+                "title": "MVT not installed",
+                "detail": "Install Mobile Verification Toolkit (mvt-ios) separately to scan an existing authorized backup.",
+                "evidence": [],
+            }
+        )
         return
     output_dir = raw / "mvt-results"
     output_dir.mkdir(mode=0o700)
     command = [executable, "check-backup", "--output", str(output_dir), str(source)]
     result = run_command(command, timeout=3600)
-    report.setdefault("collection", []).append(write_command_result(raw, "mvt-check-backup", result))
-    report["mvt"] = {"input_backup":str(source), "output_directory":f"{EVIDENCE_DIR_NAME}/mvt-results",
-                      "note":"MVT output is triage evidence, not proof that a device is clean or compromised."}
+    report.setdefault("collection", []).append(
+        write_command_result(raw, "mvt-check-backup", result)
+    )
+    report["mvt"] = {
+        "input_backup": str(source),
+        "output_directory": f"{EVIDENCE_DIR_NAME}/mvt-results",
+        "note": "MVT output is triage evidence, not proof that a device is clean or compromised.",
+    }
 
 
 if __name__ == "__main__":

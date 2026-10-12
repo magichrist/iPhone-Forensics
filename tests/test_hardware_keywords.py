@@ -5,6 +5,7 @@ A keyword with surrounding whitespace silently narrows its match window
 (e.g. " backlight" never matches a string starting with "backlight"), so the
 tuples must stay lowercase, duplicate-free, and whitespace-free.
 """
+
 from iphone_forensics.hardware import (
     BATTERY_SERVICE_HINTS,
     PANIC_HINTS,
@@ -30,6 +31,7 @@ def _report(panic=None):
 
 # ------------------------------------------------------------------ backlight
 
+
 def test_backlight_typo_regression_routes_to_display_bucket():
     """' backlight' (leading space) missed strings starting with 'backlight'."""
     report = _report([{"panicString": "backlight driver fault on gpu"}])
@@ -51,6 +53,7 @@ def test_backlight_substring_in_sentence_still_matches():
 
 # ------------------------------------------------------------ case handling
 
+
 def test_keyword_matching_is_case_insensitive():
     report = _report([{"panicString": "CAMERA ISP Fault While Streaming"}])
     assessment = assess_hardware(report)
@@ -60,13 +63,15 @@ def test_keyword_matching_is_case_insensitive():
 def test_thermal_hint_matching_is_case_insensitive():
     report = _report([{"panicString": "THERMALmonitord overheat shutdown"}])
     assessment = assess_hardware(report)
-    thermal = [c for c in assessment["checks"]
-               if c["subsystem"] == "thermal" and "panic" in c["source"]]
+    thermal = [
+        c for c in assessment["checks"] if c["subsystem"] == "thermal" and "panic" in c["source"]
+    ]
     assert thermal, "thermal keyword should produce a thermal triage check"
     assert thermal[0]["status"] == "inconclusive"
 
 
 # ------------------------------------------------------------ tuple hygiene
+
 
 def test_no_hint_keyword_has_surrounding_whitespace():
     for hints in _PAIR_HINT_TUPLES:
@@ -81,8 +86,7 @@ def test_no_hint_keyword_has_surrounding_whitespace():
 def test_no_panic_keyword_has_surrounding_whitespace():
     for subsystem, keywords in PANIC_KEYWORD_MAP.items():
         for keyword in keywords:
-            assert keyword == keyword.strip(), (
-                f"untrimmed keyword in {subsystem}: {keyword!r}")
+            assert keyword == keyword.strip(), f"untrimmed keyword in {subsystem}: {keyword!r}"
 
 
 def test_all_keywords_are_lowercase():
@@ -95,8 +99,7 @@ def test_all_keywords_are_lowercase():
         assert keyword == keyword.lower(), f"non-lowercase keyword: {keyword!r}"
     for subsystem, keywords in PANIC_KEYWORD_MAP.items():
         for keyword in keywords:
-            assert keyword == keyword.lower(), (
-                f"non-lowercase keyword in {subsystem}: {keyword!r}")
+            assert keyword == keyword.lower(), f"non-lowercase keyword in {subsystem}: {keyword!r}"
 
 
 def test_no_duplicate_keywords_within_a_bucket():
@@ -111,10 +114,12 @@ def test_no_duplicate_keywords_within_a_bucket():
 
 # -------------------------------------------------------------- status guard
 
+
 def test_thermal_hint_stays_inconclusive_never_fail():
     report = _report([{"panicString": "thermal pressure event on cpu0"}])
     assessment = assess_hardware(report)
     assert assessment["subsystems"].get("thermal") in {"inconclusive", "not_tested"}
-    thermal = [c for c in assessment["checks"]
-               if c["subsystem"] == "thermal" and "panic" in c["source"]]
+    thermal = [
+        c for c in assessment["checks"] if c["subsystem"] == "thermal" and "panic" in c["source"]
+    ]
     assert thermal and thermal[0]["status"] == "inconclusive"

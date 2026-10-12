@@ -13,6 +13,7 @@ Two guarantees under test:
 
 Offline only.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,6 +21,7 @@ from pathlib import Path
 from iphone_forensics import buyer, hardware, models
 
 # ============================================================ 1. evidence trail
+
 
 def _assess(**overrides) -> dict:
     report = {"diagnostic_candidates": [], "device": {}, "collection": [], "findings": []}
@@ -29,11 +31,21 @@ def _assess(**overrides) -> dict:
 
 def test_battery_check_carries_a_full_evidence_trail():
     """A measured battery value must carry its unit, reasoning and limits."""
-    result = hardware.assess_hardware(_assess(diagnostic_candidates=[
-        {"source": "idevicediagnostics GasGauge", "key": "CycleCount", "value": "812",
-         "caveat": "unit unverified"}]))
-    check = next(c for c in result["checks"] if c["subsystem"] == "battery"
-                 and "ycle" in c["question"])
+    result = hardware.assess_hardware(
+        _assess(
+            diagnostic_candidates=[
+                {
+                    "source": "idevicediagnostics GasGauge",
+                    "key": "CycleCount",
+                    "value": "812",
+                    "caveat": "unit unverified",
+                }
+            ]
+        )
+    )
+    check = next(
+        c for c in result["checks"] if c["subsystem"] == "battery" and "ycle" in c["question"]
+    )
 
     assert check["check_id"] == "battery.cycle_count", "a stable id is required"
     assert check["collector"], "the producing collector must be named"
@@ -50,8 +62,13 @@ def test_battery_check_carries_a_full_evidence_trail():
 
 def test_a_high_cycle_count_threshold_is_labelled_a_heuristic():
     """The 500-cycle threshold must never read as a documented Apple limit."""
-    result = hardware.assess_hardware(_assess(diagnostic_candidates=[
-        {"source": "GasGauge", "key": "CycleCount", "value": "900", "caveat": ""}]))
+    result = hardware.assess_hardware(
+        _assess(
+            diagnostic_candidates=[
+                {"source": "GasGauge", "key": "CycleCount", "value": "900", "caveat": ""}
+            ]
+        )
+    )
     check = next(c for c in result["checks"] if "ycle" in c["question"])
     assert "heuristic" in check["thresholds"].lower()
     assert "not documented" in check["thresholds"].lower()
@@ -69,13 +86,15 @@ def test_missing_battery_metric_has_no_measurement_but_keeps_its_trail():
 
 
 def test_storage_checks_carry_stable_ids_and_collector():
-    result = hardware.assess_hardware(_assess(device={
-        "TotalDiskCapacity": 128_000_000_000, "TotalDataCapacity": 64_000_000_000}))
+    result = hardware.assess_hardware(
+        _assess(device={"TotalDiskCapacity": 128_000_000_000, "TotalDataCapacity": 64_000_000_000})
+    )
     ids = {check["check_id"] for check in result["checks"]}
     assert "storage.total_capacity" in ids
     assert "storage.data_vs_disk" in ids
-    assert all(check["collector"] for check in result["checks"]
-               if check["check_id"].startswith("storage."))
+    assert all(
+        check["collector"] for check in result["checks"] if check["check_id"].startswith("storage.")
+    )
 
 
 def test_collected_at_is_a_real_utc_timestamp():
@@ -90,8 +109,13 @@ def test_collected_at_is_a_real_utc_timestamp():
 
 def test_trail_survives_a_dict_round_trip():
     """Old reports and JSON sidecars must still load with the new fields."""
-    result = hardware.assess_hardware(_assess(diagnostic_candidates=[
-        {"source": "GasGauge", "key": "CycleCount", "value": "120", "caveat": ""}]))
+    result = hardware.assess_hardware(
+        _assess(
+            diagnostic_candidates=[
+                {"source": "GasGauge", "key": "CycleCount", "value": "120", "caveat": ""}
+            ]
+        )
+    )
     check = result["checks"][0]
     restored = models.SubsystemCheck.from_dict(check)
     assert restored.check_id == check["check_id"]
@@ -107,6 +131,7 @@ def test_previous_value_is_only_populated_for_comparisons():
 
 
 # =========================================================== 2. rule prerequisites
+
 
 def _evaluate(checks: dict) -> dict:
     return buyer.evaluate_v4({"checks": checks})
@@ -126,20 +151,28 @@ def test_fewer_than_three_answers_fires_the_insufficiency_rule():
 
 
 def test_critical_unknowns_fire_the_investigation_rule():
-    result = _evaluate({"battery_health": {"status": "pass"},
-                        "cameras": {"status": "pass"},
-                        "physical_damage": {"status": "fail"}})
+    result = _evaluate(
+        {
+            "battery_health": {"status": "pass"},
+            "cameras": {"status": "pass"},
+            "physical_damage": {"status": "fail"},
+        }
+    )
     assert result["verdict"] == "INVESTIGATE_FURTHER"
     assert result["rule_engine"]["fired"] == "buyer.critical_unknowns"
 
 
 def test_non_critical_failures_fire_the_repair_rule():
     """Every critical item must be answered, or rule 3 fires first — correctly."""
-    result = _evaluate({"activation_lock": {"status": "pass"},
-                        "remote_management": {"status": "pass"},
-                        "carrier_eligibility": {"status": "pass"},
-                        "icloud_signout": {"status": "pass"},
-                        "charging_usb": {"status": "fail"}})
+    result = _evaluate(
+        {
+            "activation_lock": {"status": "pass"},
+            "remote_management": {"status": "pass"},
+            "carrier_eligibility": {"status": "pass"},
+            "icloud_signout": {"status": "pass"},
+            "charging_usb": {"status": "fail"},
+        }
+    )
     assert result["verdict"] == "BUY_ONLY_AFTER_REPAIR"
     assert result["rule_engine"]["fired"] == "buyer.noncritical_failures"
 
@@ -162,16 +195,18 @@ def test_the_candidate_rule_records_why_it_did_not_fire_without_evidence():
     """An unmet prerequisite must be visible, not silently skipped."""
     result = _evaluate({})
     trace = result["rule_engine"]["trace"]
-    candidate = next(entry for entry in trace
-                     if entry["rule_id"] == "buyer.no_recorded_failures")
+    candidate = next(entry for entry in trace if entry["rule_id"] == "buyer.no_recorded_failures")
     assert candidate["status"] == "not_evaluated"
     assert candidate["missing"], "the missing prerequisite must be named"
 
 
 def test_every_rule_trace_entry_cites_a_version():
     """docs/v5/05: each verdict cites rule id + rule version."""
-    for checks in ({}, {"battery_health": {"status": "fail"}},
-                   {item["id"]: {"status": "pass"} for item in buyer.CHECKLIST}):
+    for checks in (
+        {},
+        {"battery_health": {"status": "fail"}},
+        {item["id"]: {"status": "pass"} for item in buyer.CHECKLIST},
+    ):
         for entry in _evaluate(checks)["rule_engine"]["trace"]:
             assert entry["rule_id"].startswith("buyer.")
             assert entry["rule_version"] == "1"
@@ -191,13 +226,13 @@ def test_rule_order_is_the_documented_contract():
 
 def test_a_critical_failure_outranks_non_critical_failures():
     """Rule 1 beats rule 4 even when both conditions hold."""
-    result = _evaluate({"activation_lock": {"status": "fail"},
-                        "charging_port": {"status": "fail"}})
+    result = _evaluate({"activation_lock": {"status": "fail"}, "charging_port": {"status": "fail"}})
     assert result["verdict"] == "AVOID_PURCHASE"
     assert result["rule_engine"]["fired"] == "buyer.critical_failure"
 
 
 # ============================================================ 3. wiring
+
 
 def test_trail_reaches_the_written_report(tmp_path: Path):
     """The trail must survive to report.json, not die in memory."""
@@ -211,10 +246,14 @@ def test_trail_reaches_the_written_report(tmp_path: Path):
     from iphone_forensics.evidence import run_dir_paths
 
     paths = run_dir_paths(run, "20261011-090721")
-    report = _new_report(argparse.Namespace(redact=False, compare_json=None,
-                                             sensitive_consent=False, sensitive_explicit=[]))
+    report = _new_report(
+        argparse.Namespace(
+            redact=False, compare_json=None, sensitive_consent=False, sensitive_explicit=[]
+        )
+    )
     report["diagnostic_candidates"] = [
-        {"source": "GasGauge", "key": "CycleCount", "value": "300", "caveat": ""}]
+        {"source": "GasGauge", "key": "CycleCount", "value": "300", "caveat": ""}
+    ]
     report["device"] = {"TotalDiskCapacity": 128_000_000_000}
     args = argparse.Namespace(redact=False, compare_json=None)
     _finish_run(paths["run_dir"], report, {"checks": {}}, args)

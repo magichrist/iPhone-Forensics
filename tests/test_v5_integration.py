@@ -23,6 +23,7 @@ what a run actually leaves on disk.
 
 Scope: offline only. No device, no network, no libimobiledevice.
 """
+
 from __future__ import annotations
 
 import json
@@ -35,6 +36,7 @@ from iphone_forensics import analysis, collectors, evidence, reporting, util
 from iphone_forensics.models import COLLECTION_STATUSES, normalize_status
 
 # --------------------------------------------------------------------- helpers
+
 
 def _render(tmp_path: Path, report: dict, **kwargs) -> str:
     """Drive the real HTML writer and read back what it produced."""
@@ -51,15 +53,31 @@ def _completed_report(**overrides) -> dict:
         "finished_at": "2026-01-01T00:05:00+00:00",
         "host": {"platform": "test", "python": "3.11", "architecture": "arm64"},
         "tools": {"ideviceinfo": "/usr/bin/ideviceinfo"},
-        "device": {"ProductType": "iPhone15,4", "ProductVersion": "18.1",
-                   "BuildVersion": "22B83", "ModelNumber": "MU2Y3"},
+        "device": {
+            "ProductType": "iPhone15,4",
+            "ProductVersion": "18.1",
+            "BuildVersion": "22B83",
+            "ModelNumber": "MU2Y3",
+        },
         "collection": [
-            {"name": "device-info", "status": "collected", "returncode": 0,
-             "duration_seconds": 1.0, "stdout_bytes": 100, "stderr_bytes": 0,
-             "timed_out": False},
-            {"name": "diagnostics-battery", "status": "collected", "returncode": 0,
-             "duration_seconds": 2.0, "stdout_bytes": 200, "stderr_bytes": 0,
-             "timed_out": False},
+            {
+                "name": "device-info",
+                "status": "collected",
+                "returncode": 0,
+                "duration_seconds": 1.0,
+                "stdout_bytes": 100,
+                "stderr_bytes": 0,
+                "timed_out": False,
+            },
+            {
+                "name": "diagnostics-battery",
+                "status": "collected",
+                "returncode": 0,
+                "duration_seconds": 2.0,
+                "stdout_bytes": 200,
+                "stderr_bytes": 0,
+                "timed_out": False,
+            },
         ],
         "findings": [],
     }
@@ -68,11 +86,15 @@ def _completed_report(**overrides) -> dict:
 
 
 def _incomplete_findings(report: dict) -> list[dict]:
-    return [f for f in analysis.derive_findings(report, None)
-            if str(f.get("title", "")).startswith("Collection incomplete")]
+    return [
+        f
+        for f in analysis.derive_findings(report, None)
+        if str(f.get("title", "")).startswith("Collection incomplete")
+    ]
 
 
 # =========================================================== 1. status regression
+
 
 def test_successful_collectors_produce_no_incomplete_findings():
     """Regression: v5 'collected' must not read as an incomplete collection.
@@ -98,13 +120,15 @@ def test_assessment_counts_success_before_failure():
 
 def test_real_gaps_are_counted_and_reported_once_each():
     """Every non-completing status yields exactly one gap and one finding."""
-    report = _completed_report(collection=[
-        {"name": "device-info", "status": "collected"},
-        {"name": "crash-reports", "status": "permission_denied"},
-        {"name": "app-list", "status": "skipped_by_user"},
-        {"name": "syslog", "status": "tool_missing"},
-        {"name": "diagnostics-wifi", "status": "collection_error"},
-    ])
+    report = _completed_report(
+        collection=[
+            {"name": "device-info", "status": "collected"},
+            {"name": "crash-reports", "status": "permission_denied"},
+            {"name": "app-list", "status": "skipped_by_user"},
+            {"name": "syslog", "status": "tool_missing"},
+            {"name": "diagnostics-wifi", "status": "collection_error"},
+        ]
+    )
     result = analysis.automated_assessment(report, None)
     assert result["collection_successful"] == 1
     assert result["collection_gaps"] == 4
@@ -114,11 +138,18 @@ def test_real_gaps_are_counted_and_reported_once_each():
 
 def test_unavailable_statuses_never_render_as_failed(tmp_path: Path):
     """Task §10.10: unavailable is never dressed up as a device failure."""
-    unavailable = ["permission_denied", "tool_missing", "skipped_by_user",
-                   "not_applicable", "collection_error", "unsupported"]
-    report = _completed_report(collection=[
-        {"name": f"step-{status}", "status": status} for status in unavailable
-    ] + [{"name": "device-info", "status": "collected"}])
+    unavailable = [
+        "permission_denied",
+        "tool_missing",
+        "skipped_by_user",
+        "not_applicable",
+        "collection_error",
+        "unsupported",
+    ]
+    report = _completed_report(
+        collection=[{"name": f"step-{status}", "status": status} for status in unavailable]
+        + [{"name": "device-info", "status": "collected"}]
+    )
 
     for finding in _incomplete_findings(report):
         assert finding["severity"] != "BLOCKER"
@@ -134,17 +165,20 @@ def test_unavailable_statuses_never_render_as_failed(tmp_path: Path):
 
 def test_v4_status_strings_still_read_correctly():
     """Read-compat: pre-v5 run directories must still load (docs/v5/05)."""
-    report = _completed_report(collection=[
-        {"name": "legacy-ok", "status": "success"},
-        {"name": "legacy-boundary", "status": "expected_end"},
-        {"name": "legacy-bad", "status": "failed_or_partial"},
-    ])
+    report = _completed_report(
+        collection=[
+            {"name": "legacy-ok", "status": "success"},
+            {"name": "legacy-boundary", "status": "expected_end"},
+            {"name": "legacy-bad", "status": "failed_or_partial"},
+        ]
+    )
     result = analysis.automated_assessment(report, None)
     assert result["collection_successful"] == 2
     assert result["collection_gaps"] == 1
     # Only one finding, for the one legacy entry that truly lacked evidence.
-    assert [f["title"] for f in _incomplete_findings(report)] == \
-        ["Collection incomplete: legacy-bad"]
+    assert [f["title"] for f in _incomplete_findings(report)] == [
+        "Collection incomplete: legacy-bad"
+    ]
 
 
 def test_every_emitted_status_is_inside_the_declared_vocabulary(tmp_path: Path):
@@ -153,20 +187,47 @@ def test_every_emitted_status_is_inside_the_declared_vocabulary(tmp_path: Path):
     raw.mkdir(parents=True, exist_ok=True)
 
     cases = {
-        "collected": {"command": ["x"], "returncode": 0, "stdout": b"ok", "stderr": b"",
-                      "timed_out": False},
-        "expected": {"command": ["x"], "returncode": None, "stdout": b"", "stderr": b"",
-                     "timed_out": True, "expected_stream_end": True},
-        "timeout": {"command": ["x"], "returncode": None, "stdout": b"", "stderr": b"",
-                    "timed_out": True},
-        "nonzero": {"command": ["x"], "returncode": 3, "stdout": b"", "stderr": b"bad",
-                    "timed_out": False},
-        "missing": {"command": ["nope"], "returncode": None, "stdout": b"", "stderr": b"",
-                    "timed_out": False, "missing_binary": True},
+        "collected": {
+            "command": ["x"],
+            "returncode": 0,
+            "stdout": b"ok",
+            "stderr": b"",
+            "timed_out": False,
+        },
+        "expected": {
+            "command": ["x"],
+            "returncode": None,
+            "stdout": b"",
+            "stderr": b"",
+            "timed_out": True,
+            "expected_stream_end": True,
+        },
+        "timeout": {
+            "command": ["x"],
+            "returncode": None,
+            "stdout": b"",
+            "stderr": b"",
+            "timed_out": True,
+        },
+        "nonzero": {
+            "command": ["x"],
+            "returncode": 3,
+            "stdout": b"",
+            "stderr": b"bad",
+            "timed_out": False,
+        },
+        "missing": {
+            "command": ["nope"],
+            "returncode": None,
+            "stdout": b"",
+            "stderr": b"",
+            "timed_out": False,
+            "missing_binary": True,
+        },
     }
     expected = {
         "collected": "collected",
-        "expected": "collected",      # bounded log capture is by design
+        "expected": "collected",  # bounded log capture is by design
         "timeout": "collection_error",
         "nonzero": "collection_error",
         "missing": "tool_missing",
@@ -185,6 +246,7 @@ def test_normalize_status_never_invents_a_pass():
 
 # =============================================== 2. banner / coverage integration
 
+
 def test_healthy_run_shows_no_incomplete_banner(tmp_path: Path):
     """The converse regression: a healthy run must not read as incomplete."""
     report = _completed_report()
@@ -194,9 +256,11 @@ def test_healthy_run_shows_no_incomplete_banner(tmp_path: Path):
 
 
 def test_gap_run_names_the_sections_it_could_not_evaluate(tmp_path: Path):
-    report = _completed_report(collection=[
-        {"name": "device-info", "status": "tool_missing"},
-    ])
+    report = _completed_report(
+        collection=[
+            {"name": "device-info", "status": "tool_missing"},
+        ]
+    )
     assessment = analysis.automated_assessment(report, None)
     html = _render(tmp_path, {**report, "assessment": assessment})
     assert "<section class='panel banner-incomplete'" in html
@@ -206,6 +270,7 @@ def test_gap_run_names_the_sections_it_could_not_evaluate(tmp_path: Path):
 
 
 # ============================================== 3. run-dir layout is actually wired
+
 
 def test_run_dir_layout_helper_is_the_single_source_of_names(tmp_path: Path):
     """run_dir_paths owns the naming; nothing else may invent a run dir name."""
@@ -256,11 +321,14 @@ def test_readme_is_written_by_a_real_run_finish(tmp_path: Path):
     run_dir = paths["run_dir"]
     (run_dir / "evidence").mkdir(exist_ok=True)
 
-    written = evidence.write_readme_txt(run_dir, {
-        "version": "5.0.0",
-        "generated": "2026-01-01T12:00:00+00:00",
-        "device": "iPhone15,4",
-    })
+    written = evidence.write_readme_txt(
+        run_dir,
+        {
+            "version": "5.0.0",
+            "generated": "2026-01-01T12:00:00+00:00",
+            "device": "iPhone15,4",
+        },
+    )
     assert written.is_file()
     text = written.read_text(encoding="utf-8")
     assert "report.html" in text
@@ -273,10 +341,17 @@ def test_artifacts_land_in_evidence_not_the_legacy_raw_dir(tmp_path: Path):
     paths = evidence.run_dir_paths(tmp_path, "20260101-120000")
     run_dir = paths["run_dir"]
 
-    util.write_command_result(paths["evidence_dir"], "device-info", {
-        "command": ["ideviceinfo"], "returncode": 0, "stdout": b"<plist/>", "stderr": b"",
-        "timed_out": False,
-    })
+    util.write_command_result(
+        paths["evidence_dir"],
+        "device-info",
+        {
+            "command": ["ideviceinfo"],
+            "returncode": 0,
+            "stdout": b"<plist/>",
+            "stderr": b"",
+            "timed_out": False,
+        },
+    )
 
     listed = {entry["path"] for entry in evidence.build_manifest(run_dir)["artifacts"]}
     assert any(path.startswith("evidence/") for path in listed)
@@ -295,12 +370,14 @@ def test_crash_triage_reads_both_evidence_and_legacy_raw(tmp_path: Path):
     legacy = tmp_path / "v4-run"
     (legacy / "raw" / "crash-reports").mkdir(parents=True, exist_ok=True)
     (legacy / "raw" / "crash-reports" / "panic.ips").write_text(
-        '{"panicString":"watchdog timeout"}\n', encoding="utf-8")
+        '{"panicString":"watchdog timeout"}\n', encoding="utf-8"
+    )
 
     for run_dir in (paths["run_dir"], legacy):
         triage = analysis.analyze_crash_artifacts(run_dir)
-        assert triage["panic_or_watchdog_candidate_count"] == 1, \
+        assert triage["panic_or_watchdog_candidate_count"] == 1, (
             f"{run_dir.name} triage must find its crash artifacts"
+        )
 
 
 def test_finished_run_is_cleanly_verifiable(tmp_path: Path):
@@ -317,10 +394,17 @@ def test_finished_run_is_cleanly_verifiable(tmp_path: Path):
     run.mkdir()
     paths = evidence.run_dir_paths(run, "20260101-120000")
     run_dir = paths["run_dir"]
-    util.write_command_result(paths["evidence_dir"], "device-info", {
-        "command": ["ideviceinfo"], "returncode": 0, "stdout": b"<plist/>", "stderr": b"",
-        "timed_out": False,
-    })
+    util.write_command_result(
+        paths["evidence_dir"],
+        "device-info",
+        {
+            "command": ["ideviceinfo"],
+            "returncode": 0,
+            "stdout": b"<plist/>",
+            "stderr": b"",
+            "timed_out": False,
+        },
+    )
 
     args = argparse.Namespace(redact=False, compare_json=None)
     report = _new_report(args)
@@ -343,10 +427,9 @@ def test_manifest_lists_exactly_the_files_that_exist(tmp_path: Path):
     manifest = evidence.build_manifest(run_dir)
     listed = {entry["path"] for entry in manifest["artifacts"]}
 
-    on_disk = {
-        str(path.relative_to(run_dir))
-        for path in run_dir.rglob("*") if path.is_file()
-    } - {"manifest.json"}
+    on_disk = {str(path.relative_to(run_dir)) for path in run_dir.rglob("*") if path.is_file()} - {
+        "manifest.json"
+    }
 
     assert listed == on_disk
     # And the manifest verifies against what is actually on disk.
@@ -363,10 +446,18 @@ def test_failed_collection_leaves_no_phantom_evidence(tmp_path: Path):
     collection: list[dict] = []
     # A missing binary writes stdout/stderr files but yields no usable evidence;
     # the manifest must describe files, not conclusions.
-    util.write_command_result(raw, "absent-tool", {
-        "command": ["nope"], "returncode": None, "stdout": b"", "stderr": b"not found",
-        "timed_out": False, "missing_binary": True,
-    })
+    util.write_command_result(
+        raw,
+        "absent-tool",
+        {
+            "command": ["nope"],
+            "returncode": None,
+            "stdout": b"",
+            "stderr": b"not found",
+            "timed_out": False,
+            "missing_binary": True,
+        },
+    )
     collection.append({"name": "absent-tool", "status": "tool_missing"})
 
     manifest = evidence.build_manifest(run_dir)
@@ -378,21 +469,26 @@ def test_failed_collection_leaves_no_phantom_evidence(tmp_path: Path):
 
 # ================================================== 4. consent is recorded, always
 
+
 def test_consent_state_is_recorded_for_granted_and_declined():
     """docs/v5/07: a run must state on its face whether consent was given."""
     import argparse
 
     from iphone_forensics.cli_v4 import _new_report
 
-    granted = _new_report(argparse.Namespace(redact=False, compare_json=None,
-                                             sensitive_consent=True,
-                                             sensitive_explicit=["app_list"]))
+    granted = _new_report(
+        argparse.Namespace(
+            redact=False, compare_json=None, sensitive_consent=True, sensitive_explicit=["app_list"]
+        )
+    )
     assert granted["scope"]["sensitive_collection"] == "granted"
     assert granted["scope"]["sensitive_collection_items"] == ["app_list"]
 
-    declined = _new_report(argparse.Namespace(redact=False, compare_json=None,
-                                               sensitive_consent=False,
-                                               sensitive_explicit=[]))
+    declined = _new_report(
+        argparse.Namespace(
+            redact=False, compare_json=None, sensitive_consent=False, sensitive_explicit=[]
+        )
+    )
     assert declined["scope"]["sensitive_collection"] == "declined"
     assert declined["scope"]["sensitive_collection_items"] == []
 
@@ -409,12 +505,16 @@ def test_direct_engine_invocation_records_not_requested():
 
 def test_declined_consent_is_never_rendered_as_a_failure(tmp_path: Path):
     """Declining must read as a choice, not a defect."""
-    report = _completed_report(scope={
-        "sensitive_collection": "declined",
-        "sensitive_collection_items": [],
-        "backup_requested": False, "logs_requested": False,
-        "crash_reports_requested": False, "app_inventory_requested": False,
-    })
+    report = _completed_report(
+        scope={
+            "sensitive_collection": "declined",
+            "sensitive_collection_items": [],
+            "backup_requested": False,
+            "logs_requested": False,
+            "crash_reports_requested": False,
+            "app_inventory_requested": False,
+        }
+    )
     html = _render(tmp_path, report)
     assert "declined" in html.lower()
     assert "not</b> collected" in html or "not collected" in html.lower()
@@ -445,6 +545,7 @@ def test_redaction_is_one_helper_with_absence_still_reads_as_absent():
 
 # ============================================== 5. epistemic labeling (docs/v5/05)
 
+
 def test_every_finding_reaching_a_real_report_is_labeled(tmp_path: Path):
     """docs/v5/05: no finding may reach report.json or the HTML unlabeled."""
     import argparse
@@ -459,21 +560,48 @@ def test_every_finding_reaching_a_real_report_is_labeled(tmp_path: Path):
     args = argparse.Namespace(redact=False, compare_json=None)
     report = _new_report(args)
     # Findings from several different modules, none labeled up front.
-    report["findings"].extend([
-        {"severity": "BLOCKER", "title": "Buyer-critical check failed", "detail": "x", "evidence": []},
-        {"severity": "WARNING", "title": "Recurring panic artifacts", "detail": "x", "evidence": []},
-        {"severity": "REVIEW", "title": "Exact product identifier not parsed", "detail": "x", "evidence": []},
-        {"severity": "INFO", "title": "Reported product identifier available", "detail": "x", "evidence": []},
-        {"severity": "REVIEW", "title": "Cellular signal strength",
-         "detail": "Compare against a reference in Settings.", "evidence": []},
-    ])
+    report["findings"].extend(
+        [
+            {
+                "severity": "BLOCKER",
+                "title": "Buyer-critical check failed",
+                "detail": "x",
+                "evidence": [],
+            },
+            {
+                "severity": "WARNING",
+                "title": "Recurring panic artifacts",
+                "detail": "x",
+                "evidence": [],
+            },
+            {
+                "severity": "REVIEW",
+                "title": "Exact product identifier not parsed",
+                "detail": "x",
+                "evidence": [],
+            },
+            {
+                "severity": "INFO",
+                "title": "Reported product identifier available",
+                "detail": "x",
+                "evidence": [],
+            },
+            {
+                "severity": "REVIEW",
+                "title": "Cellular signal strength",
+                "detail": "Compare against a reference in Settings.",
+                "evidence": [],
+            },
+        ]
+    )
     _finish_run(paths["run_dir"], report, {"checks": {}}, args)
 
     persisted = json.loads((paths["run_dir"] / "report.json").read_text(encoding="utf-8"))
     assert persisted["findings"]
     for finding in persisted["findings"]:
-        assert finding.get("epistemic") in EPISTEMIC_LABELS, \
+        assert finding.get("epistemic") in EPISTEMIC_LABELS, (
             f"unlabeled finding reached report.json: {finding.get('title')}"
+        )
 
     html = (paths["run_dir"] / "report.html").read_text(encoding="utf-8")
     for label in EPISTEMIC_LABELS:
@@ -484,22 +612,27 @@ def test_epistemic_labels_distinguish_evidence_from_guesswork():
     """The label must reflect how a finding was actually established."""
     from iphone_forensics.analysis import epistemic_for
 
-    assert epistemic_for({"severity": "INFO", "title": "Product identifier available"}) == "observed"
+    assert (
+        epistemic_for({"severity": "INFO", "title": "Product identifier available"}) == "observed"
+    )
     assert epistemic_for({"severity": "WARNING", "title": "Recurring panics"}) == "inferred"
     assert epistemic_for({"severity": "REVIEW", "title": "Identifier not parsed"}) == "unknown"
     # A subject only a human can check is never dressed up as observed.
-    assert epistemic_for({"severity": "REVIEW", "title": "Face ID",
-                          "detail": "Test this manually"}) == "needs_manual"
+    assert (
+        epistemic_for({"severity": "REVIEW", "title": "Face ID", "detail": "Test this manually"})
+        == "needs_manual"
+    )
     # An explicit label is always respected.
-    assert epistemic_for({"severity": "INFO", "title": "x",
-                          "epistemic": "inferred"}) == "inferred"
+    assert epistemic_for({"severity": "INFO", "title": "x", "epistemic": "inferred"}) == "inferred"
 
 
 def test_epistemic_badges_carry_text_not_colour_alone(tmp_path: Path):
     """WCAG 1.4.1: the badge must be readable without colour."""
-    report = _completed_report(findings=[
-        {"severity": "REVIEW", "title": "Identifier not parsed", "detail": "d", "evidence": []},
-    ])
+    report = _completed_report(
+        findings=[
+            {"severity": "REVIEW", "title": "Identifier not parsed", "detail": "d", "evidence": []},
+        ]
+    )
     html = _render(tmp_path, report)
     assert "Manual check required" in html
     assert "Unknown — open question" in html
@@ -507,12 +640,18 @@ def test_epistemic_badges_carry_text_not_colour_alone(tmp_path: Path):
 
 # ============================================ 6. report outline (docs/v5/04, §4C)
 
+
 def test_report_has_a_working_table_of_contents(tmp_path: Path):
     """Every TOC entry must resolve to a section that actually rendered."""
     report = _completed_report(
         hardware_assessment={"subsystems": {"battery": "pass"}, "checks": [], "warnings": []},
-        integrity_assessment={"overall": "change_detected", "classifications": {"a": "b"},
-                              "changes": [], "continuity": "not_detectable"})
+        integrity_assessment={
+            "overall": "change_detected",
+            "classifications": {"a": "b"},
+            "changes": [],
+            "continuity": "not_detectable",
+        },
+    )
     html = _render(tmp_path, report)
 
     assert "<nav" in html and "skip-link" in html
@@ -571,10 +710,19 @@ def test_report_renders_the_eleven_section_outline_in_order(tmp_path: Path):
     from iphone_forensics.reporting import SECTION_TITLES
 
     report = _completed_report(
-        hardware_assessment={"subsystems": {"battery": "pass", "storage": "not_tested"},
-                             "checks": [], "warnings": [], "disclaimer": "Not proof."},
-        integrity_assessment={"overall": "change_detected", "classifications": {"SerialNumber": "consistent"},
-                              "changes": [], "continuity": "not_detectable", "disclaimer": "Not proof."},
+        hardware_assessment={
+            "subsystems": {"battery": "pass", "storage": "not_tested"},
+            "checks": [],
+            "warnings": [],
+            "disclaimer": "Not proof.",
+        },
+        integrity_assessment={
+            "overall": "change_detected",
+            "classifications": {"SerialNumber": "consistent"},
+            "changes": [],
+            "continuity": "not_detectable",
+            "disclaimer": "Not proof.",
+        },
     )
     html = _render(tmp_path, report)
     # Headings carry an id (added for deep links); match it optionally.
@@ -592,7 +740,9 @@ def test_outline_survives_conditional_panels_being_absent(tmp_path: Path):
     from iphone_forensics.reporting import SECTION_TITLES
 
     html = _render(tmp_path, _completed_report())
-    rendered = [title.strip() for title in re.findall(r"<h2(?: id='[^']*')?>\d+\.\s*([^<]+)</h2>", html)]
+    rendered = [
+        title.strip() for title in re.findall(r"<h2(?: id='[^']*')?>\d+\.\s*([^<]+)</h2>", html)
+    ]
 
     # No hardware/integrity data -> those panels are absent, never empty shells.
     assert "Hardware and components" not in rendered
@@ -612,19 +762,30 @@ def test_every_section_title_is_referenced_by_the_rendered_report(tmp_path: Path
     run = tmp_path / "run"
     run.mkdir()
     paths = evidence.run_dir_paths(run, "20260101-120000")
-    report = _new_report(argparse.Namespace(redact=False, compare_json=None,
-                                             sensitive_consent=False,
-                                             sensitive_explicit=[]))
-    report["hardware_assessment"] = {"subsystems": {"battery": "not_tested"}, "checks": [],
-                                     "warnings": [], "disclaimer": ""}
-    _finish_run(paths["run_dir"], report, {"checks": {}},
-                argparse.Namespace(redact=False, compare_json=None))
+    report = _new_report(
+        argparse.Namespace(
+            redact=False, compare_json=None, sensitive_consent=False, sensitive_explicit=[]
+        )
+    )
+    report["hardware_assessment"] = {
+        "subsystems": {"battery": "not_tested"},
+        "checks": [],
+        "warnings": [],
+        "disclaimer": "",
+    }
+    _finish_run(
+        paths["run_dir"],
+        report,
+        {"checks": {}},
+        argparse.Namespace(redact=False, compare_json=None),
+    )
     html = (paths["run_dir"] / "report.html").read_text(encoding="utf-8")
     assert "Hardware and components" in html
     assert "Battery and power" in html
 
 
 # ============================================ 7. savvy-user surface (docs/v5/02)
+
 
 def test_advanced_help_documents_the_whole_engine_surface():
     """A savvy user must be able to discover the advanced interface from the v5 CLI."""
@@ -641,8 +802,7 @@ def test_advanced_help_documents_the_whole_engine_surface():
     assert "Advanced commands" in text
     # One binary, one name: the retired `iphone-surgery` must not be advertised.
     assert cli.PROGRAM in text
-    assert "iphone-surgery" not in text, \
-        f"the retired CLI name is still advertised:\n{text}"
+    assert "iphone-surgery" not in text, f"the retired CLI name is still advertised:\n{text}"
     # Exit codes are documented for scripting.
     assert "Exit codes" in text
     for name, _help in cli._engine_subcommands():
@@ -655,11 +815,13 @@ def test_engine_subcommand_list_is_derived_not_hardcoded():
 
     documented = {name for name, _ in _engine_subcommands()}
     parser = build_parser()
-    actual = {entry.dest for action in parser._actions
-              for entry in getattr(action, "_choices_actions", []) or []}
+    actual = {
+        entry.dest
+        for action in parser._actions
+        for entry in getattr(action, "_choices_actions", []) or []
+    }
     assert actual, "no subcommand action found on the engine parser"
-    assert documented == actual, (
-        f"--help-advanced is missing {sorted(actual - documented)}")
+    assert documented == actual, f"--help-advanced is missing {sorted(actual - documented)}"
 
 
 def test_advanced_help_stays_out_of_the_basic_help():
@@ -690,10 +852,14 @@ def test_v4_deep_links_still_land_on_the_right_section(tmp_path: Path):
     from iphone_forensics.reporting import SECTION_ALIASES
 
     report = _completed_report(
-        hardware_assessment={"subsystems": {"battery": "not_tested"}, "checks": [],
-                             "warnings": []},
-        integrity_assessment={"overall": "change_detected", "classifications": {"a": "b"},
-                              "changes": [], "continuity": "not_detectable"})
+        hardware_assessment={"subsystems": {"battery": "not_tested"}, "checks": [], "warnings": []},
+        integrity_assessment={
+            "overall": "change_detected",
+            "classifications": {"a": "b"},
+            "changes": [],
+            "continuity": "not_detectable",
+        },
+    )
     html = _render(tmp_path, report)
 
     ids = set(_re.findall(r"""id=['"]([^'"]+)['"]""", html))
@@ -710,14 +876,16 @@ def test_v4_deep_links_still_land_on_the_right_section(tmp_path: Path):
 
 # =============================================== 8. collectors integration wiring
 
+
 def test_skipped_collector_records_skipped_by_user(tmp_path: Path):
     """Consent-declined collection is recorded, never silently dropped."""
     raw = tmp_path / "raw"
     raw.mkdir(parents=True, exist_ok=True)
     collection: list[dict] = []
 
-    collectors.save_result(raw, collection, "app-list", ["pymobiledevice3", "apps", "list"],
-                           skip=True)
+    collectors.save_result(
+        raw, collection, "app-list", ["pymobiledevice3", "apps", "list"], skip=True
+    )
 
     assert len(collection) == 1
     assert collection[0]["status"] == "skipped_by_user"
@@ -730,15 +898,26 @@ def test_pairing_denial_is_permission_denied_not_collection_error(tmp_path: Path
     raw.mkdir(parents=True, exist_ok=True)
     collection: list[dict] = []
 
-    monkeypatch.setattr(collectors, "run_command", lambda *a, **k: {
-        "command": ["idevicepair"], "returncode": 1,
-        "stdout": b"", "stderr": b"device is not paired with this host: access denied",
-        "duration_seconds": 0.1, "timed_out": False,
-    })
+    monkeypatch.setattr(
+        collectors,
+        "run_command",
+        lambda *a, **k: {
+            "command": ["idevicepair"],
+            "returncode": 1,
+            "stdout": b"",
+            "stderr": b"device is not paired with this host: access denied",
+            "duration_seconds": 0.1,
+            "timed_out": False,
+        },
+    )
 
-    collectors.save_result(raw, collection, "pairing-validation",
-                           ["idevicepair", "validate"],
-                           denial_markers=collectors.PAIRING_DENIAL_MARKERS)
+    collectors.save_result(
+        raw,
+        collection,
+        "pairing-validation",
+        ["idevicepair", "validate"],
+        denial_markers=collectors.PAIRING_DENIAL_MARKERS,
+    )
     assert collection[0]["status"] == "permission_denied"
 
 
@@ -748,15 +927,26 @@ def test_healthy_output_mentioning_denial_is_not_reclassified(tmp_path: Path, mo
     raw.mkdir(parents=True, exist_ok=True)
     collection: list[dict] = []
 
-    monkeypatch.setattr(collectors, "run_command", lambda *a, **k: {
-        "command": ["idevicepair"], "returncode": 0,
-        "stdout": b"Device is paired", "stderr": b"",
-        "duration_seconds": 0.1, "timed_out": False,
-    })
+    monkeypatch.setattr(
+        collectors,
+        "run_command",
+        lambda *a, **k: {
+            "command": ["idevicepair"],
+            "returncode": 0,
+            "stdout": b"Device is paired",
+            "stderr": b"",
+            "duration_seconds": 0.1,
+            "timed_out": False,
+        },
+    )
 
-    collectors.save_result(raw, collection, "pairing-validation",
-                           ["idevicepair", "validate"],
-                           denial_markers=collectors.PAIRING_DENIAL_MARKERS)
+    collectors.save_result(
+        raw,
+        collection,
+        "pairing-validation",
+        ["idevicepair", "validate"],
+        denial_markers=collectors.PAIRING_DENIAL_MARKERS,
+    )
     assert collection[0]["status"] == "collected"
 
 

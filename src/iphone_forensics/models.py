@@ -3,6 +3,7 @@
 Everything here is deliberately plain dataclasses with `to_dict`/`from_dict`
 helpers so the report JSON layer can round-trip without a schema library.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -16,23 +17,23 @@ SEVERITIES = ("INFO", "REVIEW", "WARNING", "BLOCKER")
 CONFIDENCE_LEVELS = ("high", "medium", "low", "none")
 
 HEALTH_STATUSES = (
-    "pass",          # evidence supports that the checked property holds
+    "pass",  # evidence supports that the checked property holds
     "pass_with_warnings",
     "degraded",
     "fail",
     "inconclusive",  # evidence exists but is insufficient or contradictory
-    "not_tested",    # the test was optional and was not run
-    "unsupported",   # the hardware/service/tool chain genuinely cannot answer
+    "not_tested",  # the test was optional and was not run
+    "unsupported",  # the hardware/service/tool chain genuinely cannot answer
 )
 
 INTEGRITY_CLASSES = (
-    "verified",              # narrowly defined claim, reliable identified evidence
-    "consistent",            # all available evidence agrees; not proof of authenticity
-    "change_detected",       # comparable snapshots/records establish a change
-    "replacement_indicated", # a supported diagnostic source indicates a replacement
-    "suspicious",            # unexplained discrepancy; investigate, not proof
+    "verified",  # narrowly defined claim, reliable identified evidence
+    "consistent",  # all available evidence agrees; not proof of authenticity
+    "change_detected",  # comparable snapshots/records establish a change
+    "replacement_indicated",  # a supported diagnostic source indicates a replacement
+    "suspicious",  # unexplained discrepancy; investigate, not proof
     "inconclusive",
-    "not_detectable",        # tools cannot answer
+    "not_detectable",  # tools cannot answer
     "not_tested",
     "unsupported",
 )
@@ -54,21 +55,22 @@ _INTEGRITY_TO_HEALTH = {
 @dataclass
 class SubsystemCheck:
     """One evaluated hardware property. Never fabricates a measurement."""
-    subsystem: str            # battery, storage, display, cameras, biometrics, ...
-    question: str             # precise property being evaluated
+
+    subsystem: str  # battery, storage, display, cameras, biometrics, ...
+    question: str  # precise property being evaluated
     status: str = "not_tested"
-    test: str = ""            # what was actually performed (or would be)
-    source: str = ""          # where the evidence comes from
-    measurement: Any = None   # raw or normalized measurement, may be None
+    test: str = ""  # what was actually performed (or would be)
+    source: str = ""  # where the evidence comes from
+    measurement: Any = None  # raw or normalized measurement, may be None
     measurement_unit: str = ""
-    expected: str = ""        # expected range/condition, and its basis
+    expected: str = ""  # expected range/condition, and its basis
     observed: str = ""
     severity: str = "INFO"
     confidence: str = "low"
     model_applicability: str = "known model-specific limits apply where documented"
     ios_applicability: str = ""
     explanation: str = ""
-    alternatives: list[str] = field(default_factory=list)   # other plausible causes
+    alternatives: list[str] = field(default_factory=list)  # other plausible causes
     next_test: str = ""
     requires_hands_on: bool = False
     evidence_paths: list[str] = field(default_factory=list)
@@ -76,15 +78,15 @@ class SubsystemCheck:
     # A measurement is only as good as the trail behind it. These fields bind every
     # observation to its collector, its timestamp, its unit, its reasoning and its
     # limits, so a reader can judge the value instead of having to trust it.
-    check_id: str = ""             # stable, e.g. "battery.cycle_count"
-    collector: str = ""            # which collector produced this observation
-    collected_at: str = ""         # UTC timestamp of the collection
-    normalized_value: Any = None   # value after unit conversion, may equal `measurement`
-    interpretation: str = ""       # what the value means, in plain words
-    thresholds: str = ""           # basis for any threshold, labeled heuristic vs documented
-    limitations: str = ""          # what this observation cannot establish
-    reasoning: str = ""            # how the interpretation was reached
-    previous_value: Any = None     # compare runs only; the earlier snapshot's value
+    check_id: str = ""  # stable, e.g. "battery.cycle_count"
+    collector: str = ""  # which collector produced this observation
+    collected_at: str = ""  # UTC timestamp of the collection
+    normalized_value: Any = None  # value after unit conversion, may equal `measurement`
+    interpretation: str = ""  # what the value means, in plain words
+    thresholds: str = ""  # basis for any threshold, labeled heuristic vs documented
+    limitations: str = ""  # what this observation cannot establish
+    reasoning: str = ""  # how the interpretation was reached
+    previous_value: Any = None  # compare runs only; the earlier snapshot's value
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -98,12 +100,13 @@ class SubsystemCheck:
 @dataclass
 class Finding:
     """A statement about the device traceable to evidence."""
+
     severity: str = "INFO"
     title: str = ""
     detail: str = ""
     confidence: str = "low"
     evidence: list[str] = field(default_factory=list)
-    classification: str = ""          # INTEGRITY_CLASSES value when integrity-related
+    classification: str = ""  # INTEGRITY_CLASSES value when integrity-related
     next_test: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -118,8 +121,9 @@ class Finding:
 @dataclass
 class DeviceIdentity:
     """Identifiers as *observed* — never treated as proof of authenticity."""
+
     product_type: str = ""
-    product_version: str = ""      # iOS version
+    product_version: str = ""  # iOS version
     build_version: str = ""
     model_number: str = ""
     hardware_model: str = ""
@@ -127,7 +131,7 @@ class DeviceIdentity:
     serial_number: str | None = None
     imei: str | None = None
     udid: str | None = None
-    total_disk_capacity: int | None = None    # bytes as reported
+    total_disk_capacity: int | None = None  # bytes as reported
     total_data_capacity: int | None = None
     activation_state: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
@@ -142,29 +146,47 @@ class DeviceIdentity:
             return str(value) if value else None
 
         return cls(
-            product_type=s("ProductType"), product_version=s("ProductVersion"),
-            build_version=s("BuildVersion"), model_number=s("ModelNumber"),
-            hardware_model=s("HardwareModel"), device_name=s("DeviceName"),
+            product_type=s("ProductType"),
+            product_version=s("ProductVersion"),
+            build_version=s("BuildVersion"),
+            model_number=s("ModelNumber"),
+            hardware_model=s("HardwareModel"),
+            device_name=s("DeviceName"),
             serial_number=ident("SerialNumber"),
             imei=ident("InternationalMobileEquipmentIdentity"),
             udid=ident("UniqueDeviceID"),
             total_disk_capacity=_safe_int(device.get("TotalDiskCapacity")),
             total_data_capacity=_safe_int(device.get("TotalDataCapacity")),
             activation_state=s("ActivationState"),
-            extra={k: v for k, v in device.items()
-                   if k not in {"ProductType", "ProductVersion", "BuildVersion", "ModelNumber",
-                                "HardwareModel", "DeviceName", "SerialNumber",
-                                "InternationalMobileEquipmentIdentity", "UniqueDeviceID",
-                                "TotalDiskCapacity", "TotalDataCapacity", "ActivationState"}},
+            extra={
+                k: v
+                for k, v in device.items()
+                if k
+                not in {
+                    "ProductType",
+                    "ProductVersion",
+                    "BuildVersion",
+                    "ModelNumber",
+                    "HardwareModel",
+                    "DeviceName",
+                    "SerialNumber",
+                    "InternationalMobileEquipmentIdentity",
+                    "UniqueDeviceID",
+                    "TotalDiskCapacity",
+                    "TotalDataCapacity",
+                    "ActivationState",
+                }
+            },
         )
 
 
 @dataclass
 class EvidenceRecord:
     """One collected artifact with provenance and hash."""
-    artifact: str            # relative path inside the run directory
-    collector: str           # e.g. "libimobiledevice", "pymobiledevice3", "manual"
-    method: str              # command or human action, subject to redaction
+
+    artifact: str  # relative path inside the run directory
+    collector: str  # e.g. "libimobiledevice", "pymobiledevice3", "manual"
+    method: str  # command or human action, subject to redaction
     artifact_type: str = ""  # "stdout", "plist", "log", "panic", "photo", ...
     size_bytes: int | None = None
     sha256: str = ""
@@ -190,23 +212,23 @@ def _safe_int(value: Any) -> int | None:
 # additive: the v4 dataclasses above keep their historical fields untouched.
 
 COLLECTION_STATUSES = (
-    "collected",          # artifact captured successfully
-    "passed",             # explicit pass without a stored artifact
-    "warning",            # collected, but something deserves review
-    "failed",             # test ran and the result is negative
-    "inconclusive",       # evidence exists but is insufficient/contradictory
-    "unsupported",        # tools/hardware genuinely cannot answer
+    "collected",  # artifact captured successfully
+    "passed",  # explicit pass without a stored artifact
+    "warning",  # collected, but something deserves review
+    "failed",  # test ran and the result is negative
+    "inconclusive",  # evidence exists but is insufficient/contradictory
+    "unsupported",  # tools/hardware genuinely cannot answer
     "permission_denied",  # blocked by pairing/trust/consent
-    "tool_missing",       # required tool not installed
-    "collection_error",   # tool ran and errored (partial/timeout/crash)
-    "skipped_by_user",    # operator chose not to run it
-    "not_applicable",     # question does not apply to this device
+    "tool_missing",  # required tool not installed
+    "collection_error",  # tool ran and errored (partial/timeout/crash)
+    "skipped_by_user",  # operator chose not to run it
+    "not_applicable",  # question does not apply to this device
 )
 
 EPISTEMIC_LABELS = (
-    "observed",      # measured/read directly from an artifact
-    "inferred",      # derived from observed evidence via stated reasoning
-    "unknown",       # no evidence either way
+    "observed",  # measured/read directly from an artifact
+    "inferred",  # derived from observed evidence via stated reasoning
+    "unknown",  # no evidence either way
     "needs_manual",  # requires human hands-on inspection
 )
 
