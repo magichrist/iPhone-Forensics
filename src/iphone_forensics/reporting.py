@@ -168,6 +168,21 @@ def _val(value: Any, missing: str = MISSING) -> Any:
     return value
 
 
+def _ratio(numerator: Any, denominator: Any, missing: str = MISSING) -> str:
+    """Render an `n/d` pair as a count, or state the absence once.
+
+    Rendering `_val` on each side independently produced the literal string
+    "not provided/not provided": two honest placeholders concatenated into something
+    that reads as a broken fraction. A pair is only a ratio when both halves exist;
+    otherwise it is one fact — the measurement was not recorded.
+    """
+    num = _val(numerator, "")
+    den = _val(denominator, "")
+    if num == "" or den == "":
+        return missing
+    return f"{num}/{den}"
+
+
 def _bucket_of(status: Any, mapping: dict[str, str]) -> str:
     """Map any status string onto a dashboard bucket; unknown never becomes 'passed'."""
     try:
@@ -747,21 +762,11 @@ def _dashboard(report: dict[str, Any], redact_identifiers: bool = False) -> str:
     completeness_rows = [
         ["Automated verdict", _val(assessment.get("verdict"))],
         ["Assessment status", _val(assessment.get("status"))],
-        [
-            "Collectors completed",
-            (
-                f"{_val(assessment.get('collection_successful'))}"
-                f"/{_val(assessment.get('collection_total'))}"
-            ),
-        ],
+        ["Collectors completed",
+         _ratio(assessment.get("collection_successful"), assessment.get("collection_total"))],
         ["Failed or partial collectors", _val(assessment.get("collection_failed_or_partial"))],
-        [
-            "Identity fields present",
-            (
-                f"{_val(assessment.get('identity_fields_present'))}"
-                f"/{_val(assessment.get('identity_fields_expected'))}"
-            ),
-        ],
+        ["Identity fields present",
+         _ratio(assessment.get("identity_fields_present"), assessment.get("identity_fields_expected"))],
     ]
 
     metrics = _measured_metrics(report)
@@ -803,6 +808,42 @@ def _dashboard(report: dict[str, Any], redact_identifiers: bool = False) -> str:
         f"<h4>Battery and storage</h4>{metrics_block}"
         f"<h4>Top issues to resolve before purchase</h4>{top_block}"
         "</div>"
+    )
+
+
+def _how_to_read() -> str:
+    """The four rules that govern every number in this report, stated exactly once.
+
+    These were previously restated under each table they applied to — eleven
+    paragraphs making the same four points in slightly different words, which made
+    the report longer without making it safer. The rules are identical everywhere,
+    so they are stated once here, at the top, and the sections that depend on them
+    point back at this list rather than repeating it.
+
+    Nothing here is a caveat about *this* device. It is the reading instruction for
+    the whole document, which is why it belongs before the results rather than
+    scattered through them.
+    """
+    return (
+        "<h3>How to read this report</h3>"
+        "<p>Four rules govern every number below. They are stated once, here, and not "
+        "repeated under each table.</p>"
+        "<ol>"
+        "<li><b>Coverage is not health.</b> A run can collect everything it is able to "
+        "and still surface defects. Collection coverage and device condition are "
+        "different measurements; neither substitutes for the other.</li>"
+        "<li><b>&ldquo;Not collected&rdquo; is not &ldquo;fine&rdquo;.</b> Absent data "
+        "is shown as <i>not collected</i> or <i>not provided</i> — never as a zero, a "
+        "pass, or a healthy result.</li>"
+        "<li><b>Failed is not the same as unavailable.</b> A missing tool, a declined "
+        "consent, or a timeout is a gap in your environment. Only a check that ran and "
+        "returned a negative result is a finding about the device.</li>"
+        "<li><b>Every finding states how it was established.</b> <i>Verified</i> is read "
+        "directly from collected evidence; <i>Inferred</i> is reasoned from it, with the "
+        "reasoning shown; <i>Unknown</i> is an open question rather than a conclusion; "
+        "<i>Manual check required</i> means a person has to look, because software cannot "
+        "decide it.</li>"
+        "</ol>"
     )
 
 
@@ -1262,28 +1303,22 @@ def _unknown_panel(report: dict[str, Any]) -> str:
         f"<p>This subsection exists so that a reader never mistakes <i>not measured</i> for "
         f"<i>measured and fine</i>. It is generated from the project's capability matrix "
         f"({esc(total)} declared capabilities) and lists what software cannot decide, plus what "
-        f"this specific run did not collect. Absence of evidence is never a pass.</p>"
+        f"this specific run did not collect. Every table below follows rules 2 and 4 of "
+        f"<i>How to read this report</i>, in section 1.</p>"
         f"<p><b>Capability coverage across the whole project:</b></p><ul>{counts_items}</ul>"
         f"<h3>Can never be established in software ({esc(len(unsupported))})</h3>"
-        "<p class='muted'>The tool will never claim these. They require an authorized service "
-        "provider, on-device inspection, or are physically impossible to determine.</p>"
         + _table(
             ["Category", "Item", "Coverage", "Why it is not automatic / requirements", "Limits"],
             rows_for(unsupported),
             "No unsupported capabilities declared.",
         )
         + f"<h3>Requires a guided manual test ({esc(len(manual))})</h3>"
-        "<p class='muted'>A human must run these. Software output can never decide them; a "
-        "successful automated run leaves them unverified.</p>"
         + _table(
             ["Category", "Item", "Coverage", "How it is tested / requirements", "Limits"],
             rows_for(manual),
             "No manual capabilities declared.",
         )
         + f"<h3>Partial coverage — tool hints only ({esc(len(partial))})</h3>"
-        "<p class='muted'>These produce hints, not verdicts. A missing value here means "
-        "<i>not tested</i> (newer iOS versions frequently withhold diagnostics), never "
-        "<i>healthy</i>.</p>"
         + _table(
             ["Category", "Item", "Coverage", "Source", "Limits"],
             rows_for(partial),
@@ -1291,8 +1326,8 @@ def _unknown_panel(report: dict[str, Any]) -> str:
         )
         + "<h3>Skipped / unavailable in this specific run</h3>"
         "<p class='muted'>Collectors that failed, timed out, were not requested, or whose tool is "
-        "not installed. Each line is an evidence gap for the sections named above &mdash; "
-        "<b>not</b> a finding that something is wrong with the device.</p>"
+        "not installed. Each line is a gap in this run's evidence, <b>not</b> a finding that "
+        "something is wrong with the device (rule 3).</p>"
         + _table(
             ["Collector", "Status", "Outcome", "Exit code", "Timed out", "Duration (s)"],
             [
@@ -1542,17 +1577,19 @@ def build_html(run_dir: Path, report: dict[str, Any], redact_identifiers: bool =
         except (TypeError, ValueError):
             pass
     findings = report.get("findings", [])
+    # One table, not two. This section used to render every finding twice — once with
+    # its interpretation and evidence, then again immediately below with only its
+    # epistemic badge. Same severity, same title, same row count. Merging them makes
+    # each finding appear exactly once while keeping both columns a reader needs.
     finding_rows = [
         [
             f.get("severity", "INFO"),
             f.get("title", ""),
+            _epistemic_badge(f),
             f.get("detail", ""),
             ", ".join(f.get("evidence", [])),
         ]
         for f in findings
-    ]
-    epistemic_rows = [
-        [f.get("severity", "INFO"), f.get("title", ""), _epistemic_badge(f)] for f in findings
     ]
     # Missing collection telemetry stays "not provided" — a collector that never ran is not a
     # collector that returned zero bytes / exit code 0.
@@ -1589,18 +1626,48 @@ def build_html(run_dir: Path, report: dict[str, Any], redact_identifiers: bool =
     checklist_eval = assessment.get("buyer_checklist", evaluate(report.get("buyer_data")))
     checklist_data = report.get("buyer_data") or {}
     checks = checklist_data.get("checks", {}) if isinstance(checklist_data, dict) else {}
-    buyer_rows = []
+    # Group the checklist by category instead of emitting one flat 21-row table.
+    # Flat, it was 21 rows that almost always read "not_tested / Standard" — visually
+    # dead and impossible to take in at a glance. Grouped, a reader sees
+    # "Ownership & activation — 0 of 4 verified" and can go straight to the category
+    # they care about. Same rows, same statuses, nothing dropped.
+    checklist_order: list[str] = []
+    grouped_rows: dict[str, list[list[Any]]] = {}
+    grouped_counts: dict[str, list[int]] = {}
     for item in CHECKLIST:
         entry = checks.get(item["id"], {}) if isinstance(checks, dict) else {}
-        buyer_rows.append(
+        status = entry.get("status", "not_tested") if isinstance(entry, dict) else "not_tested"
+        category = item["category"]
+        if category not in grouped_rows:
+            grouped_rows[category] = []
+            grouped_counts[category] = [0, 0]
+            checklist_order.append(category)
+        grouped_rows[category].append(
             [
-                item["category"],
                 item["label"],
-                (entry.get("status", "not_tested") if isinstance(entry, dict) else "not_tested"),
+                status,
                 (entry.get("notes", "") if isinstance(entry, dict) else ""),
                 "Critical" if item["critical"] else "Standard",
             ]
         )
+        grouped_counts[category][1] += 1
+        if status == "pass":
+            grouped_counts[category][0] += 1
+
+    def _checklist_groups() -> str:
+        blocks = []
+        for category in checklist_order:
+            verified, total = grouped_counts[category]
+            blocks.append(
+                f"<h4>{esc(category)} &mdash; {verified} of {total} verified</h4>"
+                + _table(["Check", "Status", "Notes", "Priority"], grouped_rows[category],
+                         "No checks in this category.")
+            )
+        if not blocks:
+            return _table(["Check", "Status", "Notes", "Priority"], [], "No checks")
+        return "".join(blocks)
+
+    checklist_groups = _checklist_groups()
     buyer = checklist_data.get("buyer", {}) if isinstance(checklist_data, dict) else {}
     observations = (
         checklist_data.get("observations", {}) if isinstance(checklist_data, dict) else {}
@@ -1657,6 +1724,7 @@ def build_html(run_dir: Path, report: dict[str, Any], redact_identifiers: bool =
     if incomplete_banner and severity_class == "neutral":
         severity_class = "warn"
     unknown_panel = _unknown_panel(report)
+    how_to_read = _how_to_read()
     hardware_sections = _hardware_section(report)
     integrity_section = _integrity_section(report)
     # v5 dashboard + charts render directly under section 1. They read the same
@@ -1778,12 +1846,13 @@ footer{{margin-top:30px;padding-top:16px;border-top:1px solid var(--line);color:
 </style></head><body><main>
 <header><p class="muted">LOCAL DEVICE INSPECTION · V{esc(report.get("version"))}</p><h1>Used iPhone Inspection Report</h1><p class="muted">Started {esc(report.get("started_at"))} · Finished {esc(report.get("finished_at"))}</p></header>
 <section class="panel hero"><h2>1. Executive summary</h2><div class="verdict {severity_class}">{esc(assessment.get("verdict", "INCOMPLETE — NO ASSESSMENT"))}</div><p>{esc(assessment.get("description", ""))}</p>
-<div class="stats"><div class="stat"><span class="muted">Collectors completed</span><b>{esc(_val(assessment.get("collection_successful")))}/{esc(_val(assessment.get("collection_total")))}</b></div><div class="stat"><span class="muted">Failed / partial</span><b>{esc(_val(assessment.get("collection_failed_or_partial")))}</b></div><div class="stat"><span class="muted">Identity fields</span><b>{esc(_val(assessment.get("identity_fields_present")))}/{esc(_val(assessment.get("identity_fields_expected")))}</b></div><div class="stat"><span class="muted">Checklist passed</span><b>{esc(_val(checklist_eval.get("counts", {}).get("pass")))}/{len(CHECKLIST)}</b></div></div>
+<div class="stats"><div class="stat"><span class="muted">Collectors completed</span><b>{esc(_ratio(assessment.get("collection_successful"), assessment.get("collection_total"), NOT_COLLECTED))}</b></div><div class="stat"><span class="muted">Failed / partial</span><b>{esc(_val(assessment.get("collection_failed_or_partial")))}</b></div><div class="stat"><span class="muted">Identity fields</span><b>{esc(_ratio(assessment.get("identity_fields_present"), assessment.get("identity_fields_expected"), NOT_COLLECTED))}</b></div><div class="stat"><span class="muted">Checklist passed</span><b>{esc(_val(checklist_eval.get("counts", {}).get("pass")))}/{len(CHECKLIST)}</b></div></div>
 <p class="callout"><b>Interpretation:</b> missing or inaccessible data is unknown, not a pass or a device defect. This tool cannot certify authenticity, hardware health, water resistance, Activation Lock status, or blacklist eligibility.</p>
 {dashboard}
 {charts}
 </section>
 {incomplete_banner}
+{how_to_read}
 <section class="panel"><h2>2. Device identity and configuration</h2>
 <h3>Identity, as reported by iOS</h3>{_table(["Field", "Reported value"], identity_rows, "No parsed identity fields. Check collected metadata and Settings → General → About.")}
 <p class="muted">Identifiers such as serial number, IMEI and UDID are sensitive. Reported values are not cryptographic proof of authenticity.{" This HTML export masks identifiers; the private JSON and evidence remain unredacted." if redact_identifiers else ""}</p>
@@ -1799,18 +1868,15 @@ seller before payment.</p></section>
 <h3>Crash and panic triage</h3><p>{esc(crash_triage.get("interpretation", "No crash artifact triage was performed."))}</p><p>Files scanned: {esc(_val(crash_triage.get("files_scanned")))} · Crash/diagnostic candidates: {esc(_val(crash_triage.get("crash_or_diagnostic_count")))} · Panic/watchdog candidates: {esc(_val(crash_triage.get("panic_or_watchdog_candidate_count")))}</p>{_table(["Artifact", "Category", "Timestamp", "Process", "Panic signature (if present)"], crash_rows, "No collected crash-report files to triage. This does not mean the phone has no crash history.")}</section>
 <section class="panel"><h2>8. Buyer checklist</h2>
 <h3>Buyer-critical blockers</h3>{_table(["Status", "Item"], [["FAILED", x] for x in checklist_eval.get("critical_failures", [])] + [["NOT VERIFIED", x] for x in checklist_eval.get("critical_unknowns", [])], "No critical checklist gaps were recorded. That is not the same as a verified-clean device: most items default to not tested until a human records them.")}
-<h3>Checklist and physical tests</h3><p>Update <code>buyer-checklist.json</code> with statuses <code>pass</code>, <code>fail</code>, <code>not_tested</code>, or <code>not_applicable</code>, then rerun with <code>--buyer-json</code>.</p>
-{_table(["Category", "Check", "Status", "Notes", "Priority"], buyer_rows, "No checks")}
+<h3>Checklist and physical tests</h3><p>Update <code>buyer-checklist.json</code> with statuses <code>pass</code>, <code>fail</code>, <code>not_tested</code>, or <code>not_applicable</code>, then rerun with <code>--buyer-json</code>. Grouped by category; <i>not tested</i> is the default until a human records a result (rule 2).</p>
+{checklist_groups}
 <h3>Buyer-entered observations</h3>{_table(["Field", "Value"], buyer_summary_rows, "No observations")}</section>
-<section class="panel"><h2>9. Risks, findings and actions</h2>{_table(["Severity", "Finding", "Interpretation", "Evidence files"], finding_rows, "No automated findings. This is not a health certification.")}
-<h3>How each finding was established</h3>
-<p class='muted'>Every finding states how it was established. <b>Verified</b> means read directly from collected evidence. <b>Inferred</b> means reasoned from evidence, with the reasoning shown. <b>Unknown</b> means an open question, not a conclusion. <b>Manual check required</b> means this tool cannot observe it and a person must look.</p>
-{_table(["Severity", "Finding", "How this was established"], epistemic_rows, "No findings to label.")}
+<section class="panel"><h2>9. Risks, findings and actions</h2>
+<p class='muted'>Every finding states how it was established; rule 4 of <i>How to read this report</i> (section 1) explains the labels.</p>
+{_table(["Severity", "Finding", "How this was established", "Interpretation", "Evidence files"], finding_rows, "No automated findings. This is not a health certification.")}
 {unknown_panel}</section>
 <section class="panel"><h2>10. Evidence and coverage</h2>{_table(["Collector", "Status", "Outcome", "Exit code", "Seconds", "Output bytes", "Error bytes"], collection_rows, "No collection commands were run.")}
-<p class="muted">An expected end of a bounded live log stream is normal. Nonzero exits and timeouts should be reviewed in the evidence files before interpretation. A missing entry here means the collector never reported — it is not a zero-length success.</p>
-<p class="muted"><b>Coverage is not health.</b> A run can show full collection coverage and still surface defects; the two
-measure different things and neither substitutes for the other.</p></section>
+<p class="muted">An expected end of a bounded live log stream is normal. Nonzero exits and timeouts should be reviewed in the evidence files before interpretation. A missing entry here means the collector never reported — it is not a zero-length success (rules 2 and 3).</p></section>
 <section class="panel"><h2>11. Technical appendix</h2>
 <h3>Toolchain and evidence integrity</h3>{_table(["Tool", "Detected path"], tool_rows, "No tool inventory")}
 <p class="muted">Capability catalogs contain tool help output only. The presence of a command does not mean the project has safely executed every capability it advertises.</p>

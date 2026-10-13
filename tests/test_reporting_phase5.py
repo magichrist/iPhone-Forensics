@@ -16,7 +16,14 @@ from pathlib import Path
 
 from iphone_forensics.buyer import CHECKLIST, template
 from iphone_forensics.capabilities import COVERAGE_LEVELS, coverage_counts, get_matrix
-from iphone_forensics.reporting import MISSING, SECTION_TITLES, build_html, esc, finalize
+from iphone_forensics.reporting import (
+    MISSING,
+    NOT_COLLECTED,
+    SECTION_TITLES,
+    build_html,
+    esc,
+    finalize,
+)
 
 SERIAL = "SERIALTOPSECRET1234"
 IMEI = "351234567890123"
@@ -292,9 +299,13 @@ def test_absent_assessment_counts_are_not_rendered_as_zero(tmp_path: Path):
     html = _html(tmp_path, report)
     stats = html[html.index('<div class="stats">') : html.index('<p class="callout">')]
     tiles = dict(re.findall(r'<span class="muted">(.*?)</span><b>(.*?)</b>', stats, re.DOTALL))
-    assert tiles["Collectors completed"] == f"{MISSING}/{MISSING}"
+    # A ratio is only a ratio when both halves exist. Rendering `_val` twice used to
+    # emit the literal "not provided/not provided" here — two honest placeholders
+    # concatenated into something that reads as a broken fraction. An absent pair is
+    # one fact, stated once.
+    assert tiles["Collectors completed"] == NOT_COLLECTED
     assert tiles["Failed / partial"] == MISSING
-    assert tiles["Identity fields"] == f"{MISSING}/{MISSING}"
+    assert tiles["Identity fields"] == NOT_COLLECTED
     assert tiles["Checklist passed"] == f"{MISSING}/{len(CHECKLIST)}"
     # Regression guard: the old serializer emitted hardcoded 0 / 4 / 21 baselines here.
     for label, value in tiles.items():
