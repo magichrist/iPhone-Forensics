@@ -378,7 +378,12 @@ def _selected_dests(labels: set[str]) -> frozenset[str]:
 def _resolve_sensitive(
     namespace: argparse.Namespace, stream: Any = None
 ) -> tuple[bool, frozenset[str]]:
-    """Decide the sensitive profile: (consent_for_the_rest, explicitly_requested).
+    """Decide the sensitive profile: (blanket_consent, explicitly_requested).
+
+    The two elements mean different things and conflating them is a privacy bug:
+    the first is the *blanket* switch that enables every boolean collector, the
+    second names the specific collectors consented to. A subset selection belongs
+    in the second element only.
 
     * An explicit collector flag is itself consent **for that collector only**,
       and it also suppresses the prompt, so legacy automation that already names
@@ -392,6 +397,12 @@ def _resolve_sensitive(
     * Dests that need a value (``--syslog-seconds``, ``--backup``, ``--mvt-backup``)
       are selected but not enabled: consent never invents a capture window or a
       backup destination, so the operator must still pass the argument.
+    * A ticked checkbox returns ``sensitive=False``. The first element means
+      "blanket consent", and `_engine_args` ORs it into *every* boolean collector.
+      Returning True here therefore granted the operator everything they did not
+      tick: choosing the app inventory alone also pulled process lists, crash
+      reports, and provisioning profiles. Consent for a subset is carried entirely
+      by the second element, which is a set of specific dests.
     """
     explicit = frozenset(dest for dest in SENSITIVE_DESTS if _explicitly_requested(namespace, dest))
     if _flag_value(namespace, "yes_sensitive", False):
@@ -432,7 +443,9 @@ def _resolve_sensitive(
             + ", ".join(needs_value)
         )
         print("  e.g. --syslog-seconds 30 for log capture, --backup libimobiledevice for a backup.")
-    return True, frozenset(explicit | chosen)
+    # `sensitive` is False on purpose: the ticked items travel in `chosen`, and the
+    # blanket flag would enable collectors the operator explicitly left unticked.
+    return False, frozenset(explicit | chosen)
 
 
 # ------------------------------------------------------------ engine delegation
@@ -459,11 +472,20 @@ def _engine_args(
     def boolean(dest: str) -> bool:
         """True when this collector was named on the command line or consented to.
 
-        `sensitive` is the *blanket* consent from `--yes-sensitive`; a partial
-        checkbox selection arrives in `explicit` instead, so this no longer ORs
-        everything into every collector when a single item was ticked.
+        `explicit` is the *authoritative allowlist* whenever it is non-empty. It was
+        previously ORed together with `sensitive`, which meant a run that had both
+        a subset selection and blanket consent enabled every collector instead of
+        the selected ones — the operator ticked the app inventory and the run also
+        pulled process lists, crash reports, and provisioning profiles.
+
+        So: a non-empty `explicit` means "exactly these", and `sensitive` is only
+        consulted when nothing was named specifically, i.e. `--yes-sensitive`.
+        Naming a flag directly on the command line always wins for its own
+        collector, whichever path granted the rest.
         """
-        return bool(_given(namespace, dest)) or sensitive or dest in explicit
+        if _given(namespace, dest):
+            return True
+        return dest in explicit if explicit else bool(sensitive)
 
     # Two offline paths reach the engine's `backup_dir`: the engine's own
     # `--backup-dir`, and the facade's legacy `--mvt-backup`. Only the latter was
@@ -709,6 +731,10 @@ def _dispatch_inspect(
     announce: bool = False,
 ) -> int:
     """Hand the resolved device and consent decision to the engine.
+
+    `sensitive` is the *blanket* consent flag; `explicit` names the individual
+    collectors that were granted. Keeping them distinct is what stops a partial
+    checkbox selection from silently enabling everything.
 
     `announce` is False for the `_resolve_sensitive` path, which has already
     explained the decision it reached. Printing it a second time here made a

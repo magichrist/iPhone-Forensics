@@ -398,6 +398,91 @@ def test_partial_selection_enables_only_what_was_ticked():
     assert engine.provisioning is False
 
 
+_BOOLEAN_CONSENT_DESTS = (
+    "app_list",
+    "pmd_app_list",
+    "pmd_processes",
+    "crash_reports",
+    "pmd_crash_reports",
+    "provisioning",
+)
+
+
+def _consented_collectors(argv, ticked=None):
+    """Resolve argv the way `inspect` does, then report which collectors are on."""
+    from iphone_forensics import cli, interactive
+
+    namespace = cli._build_parser().parse_args(argv)
+    if ticked is None:
+        sensitive, explicit = True, frozenset()
+    else:
+        interactive.choose_sensitive = lambda scope: set(ticked)
+        sensitive, explicit = cli._resolve_sensitive(namespace)
+    engine = cli._engine_args(
+        namespace, output=".", device="UDID", sensitive=sensitive, explicit=explicit
+    )
+    return {dest: getattr(engine, dest) for dest in _BOOLEAN_CONSENT_DESTS}, engine
+
+
+@pytest.mark.parametrize(
+    ("argv", "ticked", "expected_on"),
+    [
+        # --yes-sensitive is the blanket switch and stays blanket.
+        (["inspect", "--yes-sensitive"], None, _BOOLEAN_CONSENT_DESTS),
+        # A ticked checkbox is an allowlist, not a licence for everything else.
+        (["inspect"], {"Installed-app inventory"}, ("app_list", "pmd_app_list")),
+        (["inspect"], {"Crash-report copy / pull"}, ("crash_reports", "pmd_crash_reports")),
+        (["inspect"], {"Running-process inventory"}, ("pmd_processes",)),
+        (["inspect"], {"Provisioning-profile inventory"}, ("provisioning",)),
+        # Declining enables nothing.
+        (["inspect"], set(), ()),
+        (["inspect", "--no-sensitive"], set(), ()),
+        # An explicit flag is consent for its own collector only.
+        (["inspect", "--crash-reports"], set(), ("crash_reports",)),
+    ],
+    ids=[
+        "yes-sensitive-blanket",
+        "ticked-app-inventory",
+        "ticked-crash-reports",
+        "ticked-processes",
+        "ticked-provisioning",
+        "declined",
+        "no-sensitive",
+        "explicit-flag-only",
+    ],
+)
+def test_consent_never_enables_more_than_was_chosen(argv, ticked, expected_on):
+    """A consent decision may only ever turn on the collectors that were chosen.
+
+    Regression: `_engine_args` ORed the blanket flag into every boolean collector,
+    so a run with both a subset selection and blanket consent enabled all of them.
+    Ticking the app inventory silently pulled process lists, crash reports, and
+    provisioning profiles too — the operator agreed to more than they were asked.
+    """
+    enabled, _engine = _consented_collectors(argv, ticked)
+    expected = {dest: dest in expected_on for dest in _BOOLEAN_CONSENT_DESTS}
+    assert enabled == expected
+
+
+def test_yes_sensitive_still_wins_when_combined_with_an_explicit_flag():
+    """Blanket consent plus a named collector still means blanket."""
+    enabled, _engine = _consented_collectors(["inspect", "--yes-sensitive", "--crash-reports"], None)
+    assert all(enabled.values())
+
+
+def test_consent_never_invents_a_capture_window_or_backup():
+    """Ticking a needs-value item must not fill in its argument.
+
+    Consent can say *whether* to capture a log stream or take a backup, never *how
+    long* or *where*. The operator still has to pass the argument themselves.
+    """
+    for ticked in ({"Live system-log capture"}, {"Full device backup"}, {"MVT backup triage"}):
+        _enabled, engine = _consented_collectors(["inspect"], ticked)
+        assert engine.syslog_seconds == 0, ticked
+        assert engine.pmd_syslog_seconds == 0, ticked
+        assert engine.backup == "none", ticked
+
+
 def test_scope_entries_all_declare_their_dests():
     """The menu and the flags must not drift apart."""
     from iphone_forensics import cli

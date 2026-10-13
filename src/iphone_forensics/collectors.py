@@ -519,7 +519,7 @@ def collect_device(args: Any, run_dir: Path, raw: Path, report: dict[str, Any], 
     if isinstance(device_time, str) and device_time.strip():
         report["clock_skew"] = {
             "device_time": device_time.strip(),
-            "host_time": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "host_time": dt.datetime.now(dt.UTC).isoformat(),
             "note": (
                 "Compare the device clock with the host clock. A skew of minutes is "
                 "normal; a skew of days suggests the clock was set by hand, which is "
