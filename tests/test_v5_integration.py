@@ -703,8 +703,14 @@ def test_report_stays_offline_and_script_free(tmp_path: Path):
     assert "onclick" not in html.lower() and "onload" not in html.lower()
 
 
-def test_report_renders_the_eleven_section_outline_in_order(tmp_path: Path):
-    """docs/v5/04 §4C: exactly 11 numbered sections, in order."""
+def test_report_renders_the_section_outline_in_order(tmp_path: Path):
+    """Exactly 9 numbered sections, in order, numbered 1..9 without gaps.
+
+    Two sections were removed (the buyer checklist and the technical appendix), so the
+    outline shrank from 11 to 9. The numbering is asserted explicitly rather than
+    derived from `len(SECTION_TITLES)`, because a test that computes its own
+    expectation from the thing it is checking proves nothing about renumbering.
+    """
     import re
 
     from iphone_forensics.reporting import SECTION_TITLES
@@ -730,7 +736,27 @@ def test_report_renders_the_eleven_section_outline_in_order(tmp_path: Path):
 
     rendered = [title.strip() for _, title in headings]
     assert rendered == list(SECTION_TITLES), f"outline drifted: {rendered}"
-    assert [number for number, _ in headings] == [str(n) for n in range(1, 12)]
+    assert [number for number, _ in headings] == [str(n) for n in range(1, 10)]
+
+
+def test_removed_sections_are_never_rendered(tmp_path: Path):
+    """The buyer checklist and technical appendix must not come back.
+
+    Guards against a future edit reintroducing either section, and pins the fact that
+    the section count is 9 rather than 11.
+    """
+    html = _render(tmp_path, _completed_report())
+    for gone in (
+        "Buyer checklist",
+        "Buyer-critical blockers",
+        "Checklist and physical tests",
+        "Buyer-entered observations",
+        "Technical appendix",
+        "Toolchain and evidence integrity",
+    ):
+        assert gone not in html, f"{gone!r} is rendered again"
+    assert "8. Risks, findings and actions" in html
+    assert "9. Evidence and coverage" in html
 
 
 def test_outline_survives_conditional_panels_being_absent(tmp_path: Path):
@@ -748,7 +774,7 @@ def test_outline_survives_conditional_panels_being_absent(tmp_path: Path):
     assert "Hardware and components" not in rendered
     assert "Parts, repairs and integrity" not in rendered
     # The remaining sections keep their declared numbers.
-    for expected in ("Executive summary", "Evidence and coverage", "Technical appendix"):
+    for expected in ("Executive summary", "Evidence and coverage"):
         assert expected in rendered
     assert set(rendered).issubset(set(SECTION_TITLES))
 

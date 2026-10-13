@@ -27,23 +27,42 @@ SECTION_TITLES: tuple[str, ...] = (
     "Parts, repairs and integrity",
     "System integrity and configuration",
     "Reliability and diagnostics",
-    "Buyer checklist",
     "Risks, findings and actions",
     "Evidence and coverage",
-    "Technical appendix",
 )
 
-# Old heading text -> the v5 section that absorbed it. Rendered as extra anchors so
-# an external deep link that points at a v4 fragment (`#8-hardware-health-assessment-v4`)
-# still lands on the right section instead of a dead link. docs/v5/10 lists this as
-# the mitigation for the section renumber.
+# Two sections were removed outright rather than emptied:
+#
+#   8. Buyer checklist — a 21-row template of manual tests with per-item guidance.
+#     The reader of this report is expected to know what a battery-cycle count or a
+#     provisioning profile is; restating the checklist taught them nothing. Crucially,
+#     nothing was lost by removing it: a critical check that FAILS is already turned
+#     into a BLOCKER finding by `analysis.derive_findings` and still renders in
+#     section 9. Only the instructional table went away.
+#
+#   11. Technical appendix — the toolchain inventory and the standing limitations
+#     prose. All of it described the *tool*, identically on every device, which is the
+#     same objection that removed the claim matrix earlier.
+#
+# The consent record that lived in the appendix is gone from the HTML too. It remains
+# in report.json under `report.scope.sensitive_collection` and in the collection log,
+# where it is machine-readable. A reader of the HTML alone can no longer confirm what
+# the run was permitted to collect.
+
+# Old heading text -> the section that absorbed it. Rendered as extra anchors so an
+# external deep link that points at a v4 fragment (`#8-hardware-health-assessment-v4`)
+# still lands on the right section instead of a dead link. docs/v5/10 lists this as the
+# mitigation for the section renumber.
+#
+# Aliases are dropped, not repointed, when the section they named is removed. An alias
+# whose target is not in SECTION_TITLES would render an anchor to nowhere, which is
+# worse than no anchor: a deep link would appear to resolve while showing nothing. The
+# buyer-checklist and technical-appendix headings therefore have no alias, and a v4
+# link to one lands at the top of the document.
 SECTION_ALIASES: tuple[tuple[str, str], ...] = (
     ("Executive summary", "Executive summary"),
-    ("Buyer-critical blockers", "Buyer checklist"),
     ("Device identity (reported by iOS)", "Device identity and configuration"),
     ("Comparison with previous inspection", "Device identity and configuration"),
-    ("Buyer checklist and physical tests", "Buyer checklist"),
-    ("Buyer-entered observations", "Buyer checklist"),
     ("Diagnostic metric candidates", "Reliability and diagnostics"),
     ("Hardware health assessment (v4)", "Hardware and components"),
     ("Hardware integrity assessment (v4)", "Parts, repairs and integrity"),
@@ -51,8 +70,6 @@ SECTION_ALIASES: tuple[tuple[str, str], ...] = (
     ("Automated findings", "Risks, findings and actions"),
     ("Unknown / unavailable / unsupported / skipped tests", "Risks, findings and actions"),
     ("Collection coverage", "Evidence and coverage"),
-    ("Toolchain, evidence integrity, and raw files", "Technical appendix"),
-    ("Scope, limitations, and next steps", "Technical appendix"),
 )
 
 # Which report sections a failed collector leaves unevaluable. Keyword match on the
@@ -218,100 +235,15 @@ def _gap_outcome(status: Any) -> str:
         return "No usable evidence collected for this step."
 
 
-def _consent_rows(report: dict[str, Any]) -> str:
-    """Render the sensitive-collection consent record (docs/v5/07).
-
-    A reader must be able to tell, from the report alone, whether the run was
-    allowed to collect app inventories, logs, or backups — and whether anything
-    was skipped because the operator declined. Declining is presented as a
-    choice, never as a defect.
-    """
-    scope = report.get("scope") if isinstance(report.get("scope"), dict) else {}
-    state = scope.get("sensitive_collection")
-    if state is None:
-        return (
-            "<p class='muted'>This run did not record a sensitive-collection consent "
-            "decision (it predates that record). Sensitive items below appear as "
-            "<i>not collected</i>.</p>"
-        )
-
-    explanations = {
-        "granted": "Granted. The operator consented, or named these collectors explicitly. "
-        "Everything listed here stays on this machine and is never transmitted.",
-        "declined": "Declined or unavailable. These items were <b>not</b> collected. "
-        "Declining loses nothing in a standard inspection: the skipped items "
-        "are recorded as <i>skipped by operator</i>, not as failures.",
-        "not_requested": "Not requested. This run was invoked directly without the consent "
-        "gate, so no sensitive collector was enabled by it.",
-    }
-    explanation = explanations.get(str(state), explanations["not_requested"])
-    items = scope.get("sensitive_collection_items") or []
-    item_cell = (
-        ", ".join(f"<code>{esc(item)}</code>" for item in items)
-        if items
-        else "<span class='muted'>none named explicitly</span>"
-    )
-
-    requested = [
-        key
-        for key in (
-            "backup_requested",
-            "logs_requested",
-            "crash_reports_requested",
-            "app_inventory_requested",
-        )
-        if scope.get(key)
-    ]
-    requested_cell = (
-        ", ".join(f"<code>{esc(key)}</code>" for key in requested)
-        if requested
-        else "<span class='muted'>no sensitive collector ran</span>"
-    )
-
-    # _Html cells: these three are generated markup (already escaped internally),
-    # so the table must not escape them a second time and render the tags as
-    # visible text. Everything device-derived inside them is escaped above.
-    return (
-        _table(
-            ["Consent", "State", "Named on the command line", "Sensitive collectors that ran"],
-            [
-                [
-                    "Sensitive collection",
-                    _Html(f"<b>{esc(state)}</b>"),
-                    _Html(item_cell),
-                    _Html(requested_cell),
-                ]
-            ],
-            "No consent record.",
-        )
-        + f"<p class='muted'>{explanation}</p>"
-    )
-
-
-# How each epistemic label reads in the report (docs/v5/05, §4 badges).
+# Human wording for each epistemic label. Paired with `_EPISTEMIC_PILL`, which
+# carries the colour for the same labels. The text is the signal; the colour is only
+# reinforcement, because colour alone is not an accessible cue (WCAG 1.4.1).
 _EPISTEMIC_TEXT: dict[str, str] = {
-    "observed": "Verified — read directly from evidence",
+    "observed": "Verified — read from collected evidence",
     "inferred": "Inferred — reasoned from evidence",
     "unknown": "Unknown — open question, not a conclusion",
     "needs_manual": "Manual check required",
 }
-
-# Accessible name + colour per label. Colour is never the only signal: the badge
-# always carries its text (WCAG 1.4.1).
-_EPISTEMIC_PILL: dict[str, str] = {
-    "observed": "#176b43",  # good
-    "inferred": "#8b5a00",  # warn
-    "unknown": "#5e6a78",  # neutral
-    "needs_manual": "#6b4f9c",  # manual/action
-}
-
-
-# Generated from _EPISTEMIC_PILL so the badge colour and its label can never
-# drift apart; no device-derived text is ever interpolated here.
-_EPISTEMIC_PILL_CSS = "".join(
-    f".pill-{label}{{color:{color};border-color:{color}}}"
-    for label, color in _EPISTEMIC_PILL.items()
-)
 
 
 def _audit_claim_matrix(report: dict[str, Any]) -> dict[str, Any]:
@@ -1653,7 +1585,6 @@ def build_html(run_dir: Path, report: dict[str, Any], redact_identifiers: bool =
         for c in report.get("collection", [])
         if isinstance(c, dict)
     ]
-    tool_rows = [[name, path or "not installed"] for name, path in report.get("tools", {}).items()]
     diagnostic_rows = [
         [m.get("source"), m.get("key"), _val(m.get("value")), m.get("interpretation")]
         for m in report.get("diagnostic_candidates", [])
@@ -1672,87 +1603,14 @@ def build_html(run_dir: Path, report: dict[str, Any], redact_identifiers: bool =
     ]
     assessment = report.get("assessment", {}) if isinstance(report.get("assessment"), dict) else {}
     checklist_eval = assessment.get("buyer_checklist", evaluate(report.get("buyer_data")))
-    checklist_data = report.get("buyer_data") or {}
-    checks = checklist_data.get("checks", {}) if isinstance(checklist_data, dict) else {}
-    # Group the checklist by category instead of emitting one flat 21-row table.
-    # Flat, it was 21 rows that almost always read "not_tested / Standard" — visually
-    # dead and impossible to take in at a glance. Grouped, a reader sees
-    # "Ownership & activation — 0 of 4 verified" and can go straight to the category
-    # they care about. Same rows, same statuses, nothing dropped.
-    checklist_order: list[str] = []
-    grouped_rows: dict[str, list[list[Any]]] = {}
-    grouped_counts: dict[str, list[int]] = {}
-    for item in CHECKLIST:
-        entry = checks.get(item["id"], {}) if isinstance(checks, dict) else {}
-        status = entry.get("status", "not_tested") if isinstance(entry, dict) else "not_tested"
-        category = item["category"]
-        if category not in grouped_rows:
-            grouped_rows[category] = []
-            grouped_counts[category] = [0, 0]
-            checklist_order.append(category)
-        grouped_rows[category].append(
-            [
-                item["label"],
-                status,
-                (entry.get("notes", "") if isinstance(entry, dict) else ""),
-                "Critical" if item["critical"] else "Standard",
-            ]
-        )
-        grouped_counts[category][1] += 1
-        if status == "pass":
-            grouped_counts[category][0] += 1
-
-    def _checklist_groups() -> str:
-        blocks = []
-        for category in checklist_order:
-            verified, total = grouped_counts[category]
-            blocks.append(
-                f"<h4>{esc(category)} &mdash; {verified} of {total} verified</h4>"
-                + _table(["Check", "Status", "Notes", "Priority"], grouped_rows[category],
-                         "No checks in this category.")
-            )
-        if not blocks:
-            return _table(["Check", "Status", "Notes", "Priority"], [], "No checks")
-        return "".join(blocks)
-
-    checklist_groups = _checklist_groups()
-    buyer = checklist_data.get("buyer", {}) if isinstance(checklist_data, dict) else {}
-    observations = (
-        checklist_data.get("observations", {}) if isinstance(checklist_data, dict) else {}
-    )
-    currency = buyer.get("currency") or "USD"  # documented default; template() always sets it
-    # Buyer-supplied observations are free text: an omitted field is "not provided", never 0.
-    buyer_summary = [
-        ["Asking price", _val(buyer.get("asking_price"))],
-        ["Currency", currency],
-        ["Country/region", _val(buyer.get("country_or_region"))],
-        ["Advertised model", _val(buyer.get("advertised_model"))],
-        ["Advertised storage", _val(buyer.get("advertised_storage"))],
-        ["Battery maximum capacity (%)", _val(observations.get("battery_max_capacity_percent"))],
-        ["Battery cycle count", _val(observations.get("battery_cycle_count"))],
-        ["Reported storage (GB)", _val(observations.get("reported_storage_gb"))],
-        ["Repair estimate", _val(observations.get("repair_estimate"))],
-        [
-            "Carrier eligibility",
-            _val(observations.get("carrier_eligibility_result"), "not_checked"),
-        ],
-    ]
-    buyer_summary_rows = [[k, v] for k, v in buyer_summary]
-    asking = buyer.get("asking_price")
-    repair = observations.get("repair_estimate")
-    projected_cost = None
-    try:
-        if asking is not None and repair is not None:
-            projected_cost = float(asking) + float(repair)
-    except (TypeError, ValueError):
-        projected_cost = None
-    if projected_cost is not None:
-        buyer_summary_rows.append(
-            [
-                "Asking price + buyer-entered repair estimate",
-                f"{projected_cost:g} {currency} (not a market valuation)",
-            ]
-        )
+    # The buyer checklist no longer renders as a section, but its evaluation still
+    # does: a critical check that failed is a BLOCKER finding in section 8, and the
+    # dashboard counts verified checks. Only the instructional table is gone.
+    #
+    # Buyer-supplied observations (asking price, repair estimate, carrier result) were
+    # rendered by that table and now have no home in the HTML. They remain in
+    # report.json under `report.buyer_data`, which is the record of what the operator
+    # entered and what the verdict was computed from.
     if report.get("comparison"):
         comparison_rows = [
             [item.get("field"), item.get("previous"), item.get("current"), item.get("status")]
@@ -1915,22 +1773,12 @@ seller before payment.</p></section>
 <section class="panel"><h2>7. Reliability and diagnostics</h2>
 <h3>Diagnostic metric candidates</h3><p>These are source fields whose names look relevant to battery, capacity, thermal, voltage, or storage. They are not normalized or interpreted as health scores; verify units and semantics against the source/tool version.</p>{_table(["Source", "Field", "Raw value", "Caveat"], diagnostic_rows, "No candidate metrics were exposed by the collected diagnostics. This is inconclusive.")}
 <h3>Crash and panic triage</h3><p>{esc(crash_triage.get("interpretation", "No crash artifact triage was performed."))}</p><p>Files scanned: {esc(_val(crash_triage.get("files_scanned")))} · Crash/diagnostic candidates: {esc(_val(crash_triage.get("crash_or_diagnostic_count")))} · Panic/watchdog candidates: {esc(_val(crash_triage.get("panic_or_watchdog_candidate_count")))}</p>{_table(["Artifact", "Category", "Timestamp", "Process", "Panic signature (if present)"], crash_rows, "No collected crash-report files to triage. This does not mean the phone has no crash history.")}</section>
-<section class="panel"><h2>8. Buyer checklist</h2>
-<h3>Buyer-critical blockers</h3>{_table(["Status", "Item"], [["FAILED", x] for x in checklist_eval.get("critical_failures", [])] + [["NOT VERIFIED", x] for x in checklist_eval.get("critical_unknowns", [])], "No critical checklist gaps were recorded. That is not the same as a verified-clean device: most items default to not tested until a human records them.")}
-<h3>Checklist and physical tests</h3><p>Update <code>buyer-checklist.json</code> with statuses <code>pass</code>, <code>fail</code>, <code>not_tested</code>, or <code>not_applicable</code>, then rerun with <code>--buyer-json</code>. Grouped by category; <i>not tested</i> is the default until a human records a result (rule 2).</p>
-{checklist_groups}
-<h3>Buyer-entered observations</h3>{_table(["Field", "Value"], buyer_summary_rows, "No observations")}</section>
-<section class="panel"><h2>9. Risks, findings and actions</h2>
+<section class="panel"><h2>8. Risks, findings and actions</h2>
 <p class='muted'>Every finding states how it was established; rule 4 of <i>How to read this report</i> (section 1) explains the labels.</p>
 {_table(["Severity", "Finding", "How this was established", "Interpretation", "Evidence files"], finding_rows, "No automated findings. This is not a health certification.")}
 {unknown_panel}</section>
-<section class="panel"><h2>10. Evidence and coverage</h2>{_table(["Collector", "Status", "Outcome", "Exit code", "Seconds", "Output bytes", "Error bytes"], collection_rows, "No collection commands were run.")}
+<section class="panel"><h2>9. Evidence and coverage</h2>{_table(["Collector", "Status", "Outcome", "Exit code", "Seconds", "Output bytes", "Error bytes"], collection_rows, "No collection commands were run.")}
 <p class="muted">An expected end of a bounded live log stream is normal. Nonzero exits and timeouts should be reviewed in the evidence files before interpretation. A missing entry here means the collector never reported — it is not a zero-length success (rules 2 and 3).</p></section>
-<section class="panel"><h2>11. Technical appendix</h2>
-<h3>Toolchain and evidence integrity</h3>{_table(["Tool", "Detected path"], tool_rows, "No tool inventory")}
-<p class="muted">Capability catalogs contain tool help output only. The presence of a command does not mean the project has safely executed every capability it advertises.</p>
-<p>SHA-256 digests and sizes are stored in <code>manifest.json</code>. They help detect changes after collection; they do not prove that device-originated data is authentic.</p><p>Machine-readable companion: <code>report.json</code>. Raw command output and capability help are in <code>evidence/</code>. Keep this directory private.</p>
-<h3>What was collected, and with what authority</h3>{_consent_rows(report)}</section>
 <footer>iPhone Forensics v{esc(report.get("version"))} · Generated locally · HTML is the primary human-readable report; JSON and manifest are companion evidence files.</footer>
 </main></body></html>"""
     # Anchors + contents list, applied to the assembled document so the outline can

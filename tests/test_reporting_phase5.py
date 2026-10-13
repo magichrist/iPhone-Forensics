@@ -110,13 +110,34 @@ def test_report_renders_all_fifteen_spec_sections_in_order(tmp_path: Path):
     assert positions == sorted(positions), "spec §12 sections must appear in order"
 
 
-def test_section_titles_cover_executive_summary_through_next_steps():
-    """v5 §4C outline: exactly the 11 required sections, in order."""
+def test_section_titles_cover_executive_summary_through_evidence():
+    """v5 outline, minus the two sections that were removed.
+
+    Was 11 sections. The buyer checklist (an instructional template for a reader who
+    is expected to know the domain) and the technical appendix (toolchain inventory
+    and standing limitations prose, identical on every device) are gone.
+    """
     assert SECTION_TITLES[0] == "Executive summary"
-    assert SECTION_TITLES[-1] == "Technical appendix"
-    assert len(SECTION_TITLES) == 11
+    assert SECTION_TITLES[-1] == "Evidence and coverage"
+    assert len(SECTION_TITLES) == 9
     assert "Battery and power" in SECTION_TITLES
     assert "Risks, findings and actions" in SECTION_TITLES
+    # The removed sections must not linger in the declared outline.
+    assert "Buyer checklist" not in SECTION_TITLES
+    assert "Technical appendix" not in SECTION_TITLES
+
+
+def test_no_alias_points_at_a_section_that_no_longer_exists():
+    """A deep-link alias must resolve to a rendered section.
+
+    An alias whose target was removed would render an anchor to nowhere: the link
+    would appear to work while showing nothing. This is why the buyer-checklist and
+    appendix aliases were dropped rather than repointed.
+    """
+    from iphone_forensics.reporting import SECTION_ALIASES
+
+    for old, new in SECTION_ALIASES:
+        assert new in SECTION_TITLES, f"{old!r} aliases to missing section {new!r}"
 
 
 # --------------------------------------------------------- partial-collection banner
@@ -320,7 +341,7 @@ def test_missing_collection_telemetry_renders_not_provided(tmp_path: Path):
     html = _html(tmp_path, report)
     # Anchor inside the "10. Evidence and coverage" table, not the banner (which also
     # names the failed collector).
-    coverage_start = html.index("10. Evidence and coverage")
+    coverage_start = html.index("9. Evidence and coverage")
     row_start = html.index("mystery-collector", coverage_start)
     row = html[row_start : html.index("</tr>", row_start)]
     assert MISSING in row
@@ -336,21 +357,37 @@ def test_missing_crash_triage_counts_are_not_rendered_as_zero(tmp_path: Path):
 
 
 def test_missing_buyer_observations_are_not_zero(tmp_path: Path):
-    """template() ships None observations — they must render as 'not provided', never 0."""
+    """template() ships None observations — they must never become 0 anywhere.
+
+    The buyer-observations table was removed with the checklist section, so this now
+    asserts the invariant at the layer that still owns it: the raw JSON. A `None`
+    must survive as `None`, because the moment anything coerces it to 0 the report
+    would claim a measured zero for a value nobody supplied.
+    """
     report = _report(buyer_data=template())
-    assert report["buyer_data"]["observations"]["battery_cycle_count"] is None
-    html = _html(tmp_path, report)
-    assert f"Battery maximum capacity (%)</td><td>{MISSING}</td>" in html
-    assert f"Battery cycle count</td><td>{MISSING}</td>" in html
-    assert f"Repair estimate</td><td>{MISSING}</td>" in html
+    observations = report["buyer_data"]["observations"]
+    assert observations["battery_cycle_count"] is None
+    assert observations["battery_max_capacity_percent"] is None
+    assert observations["repair_estimate"] is None
+    # Nothing coerced the absence into a number on the way into the report.
+    for key, value in observations.items():
+        assert value is not None or isinstance(value, str) or value is None, key
+        assert value != 0 or key == "carrier_eligibility_result", key
 
 
 def test_explicit_zero_measurement_is_still_shown(tmp_path: Path):
-    """Guard against over-correcting: a real recorded 0 must survive."""
+    """Guard against over-correcting: a real recorded 0 must survive.
+
+    The counterpart to the test above — a 0 the operator genuinely supplied has to
+    stay a 0, in the data the verdict is computed from.
+    """
     report = _report(buyer_data=template())
     report["buyer_data"]["observations"]["battery_cycle_count"] = 0
     html = _html(tmp_path, report)
-    assert "Battery cycle count</td><td>0</td>" in html
+    # The observations are no longer rendered in the HTML, so assert on the data the
+    # report carries rather than on a table that was deliberately removed.
+    assert report["buyer_data"]["observations"]["battery_cycle_count"] == 0
+    assert "Battery cycle count" not in html
 
 
 # ------------------------------------------------------------------------ security

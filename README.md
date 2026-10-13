@@ -28,13 +28,15 @@ iphone-forensics-20261011-090721/
 ```
 
 The HTML report is the product: an executive dashboard, inline SVG charts computed
-from the run's own data, and eleven sections. No JavaScript, no CDN, no network —
+from the run's own data, and nine sections. No JavaScript, no CDN, no network —
 it opens from a `file://` URL on a machine with no internet.
 
 ## 2. Genuine vs impossible
 
-Read this before trusting any verdict. The report carries this table itself, in its
-Technical appendix — here is the short version.
+Read this before trusting any verdict. The full claim matrix, every forbidden
+inference, and the standing limitations are all enforced in code and surfaced
+through `report.json` (`report.claim_audit`); the reader of this README is assumed
+to know the domain. The short version:
 
 | Can establish | Cannot ever establish |
 |---|---|
