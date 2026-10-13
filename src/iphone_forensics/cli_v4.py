@@ -43,8 +43,8 @@ from .evidence import (
 from .hardware import assess_hardware, manual_subsystem_checks
 from .integrity import assess_integrity
 from .reporting import finalize
+from .util import open_in_browser, run_command, write_json
 from .util import redact as util_redact
-from .util import run_command, write_json
 
 PROGRAM = "iphone-forensics"
 # The engine's former standalone name. Kept only so the deprecated `iphone-forensics`
@@ -1482,6 +1482,31 @@ def _finish_run(
     )
     build_manifest(run_dir)
     console.stage_done(5)
+    _offer_report_in_browser(run_dir, args)
+
+
+def _offer_report_in_browser(run_dir: Path, args: argparse.Namespace) -> bool:
+    """Open report.html unless the caller opted out or nothing is watching.
+
+    The HTML report is the product, so handing it to the reader is the natural end
+    of a run rather than something they have to go and find. Three conditions must
+    hold before a browser is launched:
+
+      * ``--no-open`` was not passed (an explicit opt-out always wins);
+      * stdout is a real terminal — a piped or CI run has no reader to show the
+        window to, and popping one up there is noise, not courtesy;
+      * the file actually exists, because a report failed to write is a defect we
+        must not paper over with a viewer that shows a stale page.
+
+    Returns whether a browser was handed the path. Failure is silent by design: the
+    report is already written and its path already printed, so a viewer that will not
+    start costs the reader nothing and must never turn a good run into a bad one.
+    """
+    if getattr(args, "no_open", False):
+        return False
+    if not sys.stdout.isatty():
+        return False
+    return open_in_browser(run_dir / "report.html")
 
 
 def _exit_for(report: dict[str, Any], args: argparse.Namespace, *, completed: bool = True) -> int:

@@ -67,6 +67,29 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def open_in_browser(path: Path) -> bool:
+    """Open a local file in the user's default browser. Never raises.
+
+    Returns True when the hand-off was handed to the OS. `webbrowser` shells out to
+    the platform opener, which may itself fail on a headless box or a stripped-down
+    container; that is an environment condition, not a report defect, so it is
+    swallowed rather than raised. The report is already on disk either way and the
+    path has been printed, so a failed open costs the reader nothing.
+
+    The path is passed through `Path.as_uri()` rather than interpolated into a URL,
+    so spaces and other characters in a run directory name cannot break the URL or
+    smuggle a fragment into it.
+    """
+    try:
+        if not path.is_file():
+            return False
+        import webbrowser
+
+        return bool(webbrowser.open(path.resolve().as_uri()))
+    except Exception:  # noqa: BLE001 - opening a viewer must never break a run
+        return False
+
+
 def run_command(command: list[str], timeout: int = 45) -> dict[str, Any]:
     """Run a bounded, non-interactive command and preserve byte output."""
     started = time.monotonic()

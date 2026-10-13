@@ -972,6 +972,14 @@ def _augment_facade_commands(sub: Any) -> None:
             command.description = description
         if name == "inspect":
             _add_consent_flags(command, hidden=False)
+            # Auto-open is on for a human at a terminal, so it needs a documented
+            # way out for scripts and for anyone who just wants the files.
+            command.add_argument(
+                "--no-open",
+                dest="no_open",
+                action="store_true",
+                help="Do not open report.html in a browser when the run finishes.",
+            )
         _add_compat_flags(command, all_flags=all_flags)
         command.set_defaults(func=facade_func)
 
