@@ -275,6 +275,48 @@ CAPABILITIES: list[dict[str, str]] = [
     },
     # ------------------------------------------------------------ parts history
     {
+        "category": "identity",
+        "item": "Device clock vs host clock",
+        "coverage": "partial",
+        "source": "idevicedate (bare invocation only) compared with host UTC",
+        "requirements": "libimobiledevice installed; host trust established",
+        "limits": (
+            "A skew of minutes is normal. A skew of days suggests the clock was set "
+            "by hand, which is a legitimate thing to have done and only a hint about "
+            "setup history — never proof of tampering. The mutating forms of this tool "
+            "(-s, -c) are refused by the read-only guard."
+        ),
+        "model_applicability": "All models exposing the value.",
+        "ios_applicability": "Always available to a trusted host.",
+    },
+    {
+        "category": "parts_history",
+        "item": "DeveloperDiskImage mount / developer mode state",
+        "coverage": "partial",
+        "source": "ideviceimagemounter list + devmodestatus",
+        "requirements": "libimobiledevice installed; iOS 16+ for developer mode status",
+        "limits": (
+            "A mounted image or enabled developer mode hints at prior development or "
+            "jailbreak activity. Developer use is legitimate and this is not a parts "
+            "or repair record. Mount and unmount are refused by the read-only guard."
+        ),
+        "model_applicability": "All models; developer mode status requires iOS 16+.",
+        "ios_applicability": "Both subcommands are query-only and available to a trusted host.",
+    },
+    {
+        "category": "parts_history",
+        "item": "Paired companion devices (Watch / AirPods)",
+        "coverage": "partial",
+        "source": "pymobiledevice3 companion list",
+        "requirements": "pymobiledevice3 installed",
+        "limits": (
+            "Accessory pairing history the seller may not mention. Useful background "
+            "for setup and for unpairing later; not evidence of tampering."
+        ),
+        "model_applicability": "All models.",
+        "ios_applicability": "Requires a device that supports companion pairing.",
+    },
+    {
         "category": "parts_history",
         "item": "Apple Parts & Service History",
         "coverage": "manual",
@@ -298,10 +340,18 @@ CAPABILITIES: list[dict[str, str]] = [
     {
         "category": "ownership",
         "item": "Activation Lock / Find My",
-        "coverage": "manual",
-        "source": "Seller erases and signs out; buyer performs reactivation test",
-        "requirements": "Seller cooperation + network access during reactivation",
-        "limits": "A Mac-side activation query is not conclusive; only the full erase-and-reactivate cycle decides.",
+        "coverage": "partial",
+        "source": "pymobiledevice3 activation state + seller erase / buyer reactivation",
+        "requirements": (
+            "pymobiledevice3 for the state query; seller cooperation + network access "
+            "during reactivation for the decisive check"
+        ),
+        "limits": (
+            "The host-side query reports the device's current activation state and is "
+            "evidence, not a verdict. It does not exercise the full Setup Assistant "
+            "flow, the device can report differently before and after an erase, and "
+            "only the seller's erase followed by your own reactivation decides."
+        ),
         "model_applicability": "All models.",
         "ios_applicability": "Activation screens and sign-out flow differ per iOS version.",
     },

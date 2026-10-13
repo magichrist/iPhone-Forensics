@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import normalize_status
+from .readonly import enforce_read_only
 
 REDACTED = "••••"
 
@@ -90,8 +91,28 @@ def open_in_browser(path: Path) -> bool:
         return False
 
 
-def run_command(command: list[str], timeout: int = 45) -> dict[str, Any]:
-    """Run a bounded, non-interactive command and preserve byte output."""
+def run_command(
+    command: list[str],
+    timeout: int = 45,
+    *,
+    device_command: bool = False,
+    enforce: bool = True,
+) -> dict[str, Any]:
+    """Run a bounded, non-interactive command and preserve byte output.
+
+    `device_command=True` routes the command through the read-only allowlist before
+    it is spawned, so a collector cannot reach a device with a mutating form by
+    accident. It defaults to False because plenty of commands here are host-only
+    (`--help`, `version`) and must stay callable; every command that touches a
+    device passes True.
+
+    `enforce=False` is the *only* supported way to skip the check, it is keyword-
+    only, and `collect_device` never passes it. It exists so that tests which stub
+    `run_command` with a narrow signature can keep working, and so a caller with a
+    legitimate reason can opt out deliberately and visibly rather than by accident.
+    """
+    if device_command and enforce:
+        enforce_read_only(command)
     started = time.monotonic()
     try:
         result = subprocess.run(
@@ -135,10 +156,18 @@ def run_command(command: list[str], timeout: int = 45) -> dict[str, Any]:
         }
 
 
-def capture_stream(command: list[str], seconds: int, output_path: Path) -> dict[str, Any]:
-    """Capture a live stream until a monotonic deadline; always terminate the child."""
+def capture_stream(
+    command: list[str], seconds: int, output_path: Path, *, device_command: bool = False
+) -> dict[str, Any]:
+    """Capture a live stream until a monotonic deadline; always terminate the child.
+
+    Takes the same `device_command` guard as `run_command`, because the syslog
+    collectors spawn through here rather than through `run_command`.
+    """
     import tempfile
 
+    if device_command:
+        enforce_read_only(command)
     started = time.monotonic()
     timed_out = False
     returncode: int | None = None

@@ -41,9 +41,16 @@ POSIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="POSIX subproces
 # ------------------------------------------------------------- returncode 0 -> collected
 
 
+# `save_result` refuses any command that is not provably read-only, so a test that
+# drives it with a host binary (`python -c ...`) must declare that it is not issuing
+# a device command. `HOST` is that declaration. Real collectors never pass it, and
+# tests/test_readonly_guard.py pins that the guard cannot be bypassed silently.
+HOST = {"enforce_read_only_check": False}
+
+
 def test_success_exit_maps_to_collected(tmp_path: Path):
     collection: list[dict] = []
-    save_result(tmp_path, collection, "echo-ok", [sys.executable, "-c", "print('ok')"], 15)
+    save_result(tmp_path, collection, "echo-ok", [sys.executable, "-c", "print('ok')"], 15, **HOST)
     entry = collection[0]
     assert entry["status"] == "collected"
     assert entry["status_detail"] == "exit code 0"
@@ -58,7 +65,7 @@ def test_success_exit_maps_to_collected(tmp_path: Path):
 def test_nonzero_exit_maps_to_collection_error(tmp_path: Path):
     collection: list[dict] = []
     save_result(
-        tmp_path, collection, "always-fails", [sys.executable, "-c", "raise SystemExit(3)"], 15
+        tmp_path, collection, "always-fails", [sys.executable, "-c", "raise SystemExit(3)"], 15, **HOST
     )
     entry = collection[0]
     assert entry["status"] == "collection_error"
@@ -70,9 +77,26 @@ def test_nonzero_exit_maps_to_collection_error(tmp_path: Path):
 # -------------------------------------------------------------- missing binary -> tool_missing
 
 
-def test_missing_binary_maps_to_tool_missing(tmp_path: Path):
+def test_missing_binary_maps_to_tool_missing(tmp_path: Path, monkeypatch):
+    # Simulate ENOENT for a real allowlisted shape. An invented binary name would be
+    # refused by the read-only guard before ENOERT could ever happen, which would
+    # make this test assert the wrong thing; the guard has its own suite in
+    # tests/test_readonly_guard.py.
+    def fake_run(command, timeout=45, **_kw):
+        return {
+            "command": command,
+            "returncode": None,
+            "stdout": b"",
+            "stderr": b"",
+            "duration_seconds": 0.0,
+            "timed_out": False,
+            "missing_binary": True,
+            "os_error_type": "FileNotFoundError",
+        }
+
+    monkeypatch.setattr("iphone_forensics.collectors.run_command", fake_run)
     collection: list[dict] = []
-    save_result(tmp_path, collection, "bogus-tool", ["definitely-not-a-real-binary-xyz"], 5)
+    save_result(tmp_path, collection, "bogus-tool", ["idevice_id", "-l"], 5)
     entry = collection[0]
     assert entry["status"] == "tool_missing"
     assert entry["returncode"] is None
@@ -90,6 +114,7 @@ def test_missing_binary_via_write_command_result_directly(tmp_path: Path):
 # --------------------------------------------------------------------- timeout -> collection_error
 
 
+
 @POSIX_ONLY
 def test_timeout_maps_to_collection_error_and_keeps_timed_out(tmp_path: Path):
     collection: list[dict] = []
@@ -99,6 +124,7 @@ def test_timeout_maps_to_collection_error_and_keeps_timed_out(tmp_path: Path):
         "slow-command",
         [sys.executable, "-c", "import time; time.sleep(5)"],
         1,
+        **HOST,
     )
     entry = collection[0]
     assert entry["status"] == "collection_error"
@@ -154,7 +180,7 @@ def test_skip_records_skipped_by_user_and_never_runs(tmp_path: Path):
 
 
 def test_denial_marker_on_errored_run_maps_to_permission_denied(tmp_path: Path, monkeypatch):
-    def fake_run(command, timeout=45):
+    def fake_run(command, timeout=45, **_kw):
         return {
             "command": command,
             "returncode": 255,
@@ -181,7 +207,7 @@ def test_denial_marker_on_errored_run_maps_to_permission_denied(tmp_path: Path, 
 def test_denial_marker_on_healthy_run_stays_collected(tmp_path: Path, monkeypatch):
     """Conservative guard: a successful run that merely mentions 'denied' is not a denial."""
 
-    def fake_run(command, timeout=45):
+    def fake_run(command, timeout=45, **_kw):
         return {
             "command": command,
             "returncode": 0,
@@ -227,10 +253,14 @@ def test_discover_devices_without_tools_records_tool_missing(tmp_path: Path, mon
 def test_all_emitted_statuses_are_in_collection_statuses(tmp_path: Path):
     """Round-trip: whatever the layer emits is a valid, idempotent status."""
     collection: list[dict] = []
-    save_result(tmp_path, collection, "ok", [sys.executable, "-c", "pass"], 15)
-    save_result(tmp_path, collection, "bad", [sys.executable, "-c", "raise SystemExit(1)"], 15)
-    save_result(tmp_path, collection, "missing", ["definitely-not-a-real-binary-xyz"], 5)
-    save_result(tmp_path, collection, "skipped", [sys.executable, "-c", "pass"], 15, skip=True)
+    save_result(tmp_path, collection, "ok", [sys.executable, "-c", "pass"], 15, **HOST)
+    save_result(
+        tmp_path, collection, "bad", [sys.executable, "-c", "raise SystemExit(1)"], 15, **HOST
+    )
+    save_result(tmp_path, collection, "missing", ["definitely-not-a-real-binary-xyz"], 5, **HOST)
+    save_result(
+        tmp_path, collection, "skipped", [sys.executable, "-c", "pass"], 15, skip=True, **HOST
+    )
     statuses = [entry["status"] for entry in collection]
     assert statuses == ["collected", "collection_error", "tool_missing", "skipped_by_user"]
     for status in statuses:
@@ -269,10 +299,14 @@ def test_status_aliases_for_readers_match_models():
 def test_legacy_strings_are_never_emitted(tmp_path: Path):
     """The v4 strings may be *read* (normalized), never *written*."""
     collection: list[dict] = []
-    save_result(tmp_path, collection, "ok", [sys.executable, "-c", "pass"], 15)
-    save_result(tmp_path, collection, "bad", [sys.executable, "-c", "raise SystemExit(2)"], 15)
-    save_result(tmp_path, collection, "missing", ["definitely-not-a-real-binary-xyz"], 5)
-    save_result(tmp_path, collection, "skip", [sys.executable, "-c", "pass"], 15, skip=True)
+    save_result(tmp_path, collection, "ok", [sys.executable, "-c", "pass"], 15, **HOST)
+    save_result(
+        tmp_path, collection, "bad", [sys.executable, "-c", "raise SystemExit(2)"], 15, **HOST
+    )
+    save_result(tmp_path, collection, "missing", ["definitely-not-a-real-binary-xyz"], 5, **HOST)
+    save_result(
+        tmp_path, collection, "skip", [sys.executable, "-c", "pass"], 15, skip=True, **HOST
+    )
     for entry in collection:
         assert entry["status"] not in {"success", "expected_end", "failed_or_partial"}
 
@@ -307,7 +341,9 @@ def test_write_command_result_override_paths(tmp_path: Path):
 
 def test_save_result_never_raises_on_bogus_input(tmp_path: Path):
     collection: list[dict] = []
-    save_result(tmp_path, collection, "nope", ["definitely-not-a-real-binary-xyz"], 1)
+    save_result(
+        tmp_path, collection, "nope", ["definitely-not-a-real-binary-xyz"], 1, **HOST
+    )
     save_result(tmp_path, collection, "nope-skip", ["whatever"], 1, skip=True)
     assert len(collection) == 2
     for entry in collection:

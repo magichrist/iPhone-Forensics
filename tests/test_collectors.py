@@ -41,7 +41,7 @@ def test_udid_flag_is_only_passed_when_the_installed_build_accepts_it(monkeypatc
 
     calls = []
 
-    def fake_run(command, timeout=None):
+    def fake_run(command, timeout=None, **_kw):
         calls.append(command)
         if command[-1] == "--help":
             return {
@@ -123,7 +123,7 @@ def test_disk_usage_domain_is_queried_for_storage_capacity(monkeypatch, tmp_path
     """
     from iphone_forensics import collectors
 
-    def fake_run(command, timeout=None):
+    def fake_run(command, timeout=None, **_kw):
         if "-q" in command and "com.apple.disk_usage" in command:
             return {
                 "stdout": b"TotalDiskCapacity: 128000000000\nTotalDataCapacity: 115484557312\n",
@@ -189,7 +189,7 @@ def test_unavailable_diagnostics_relay_is_unsupported_not_an_error(monkeypatch, 
     monkeypatch.setattr(
         collectors,
         "run_command",
-        lambda command, timeout=None: {
+        lambda command, timeout=None, **_kw: {
             "stdout": b"",
             "stderr": b"ERROR: Could not connect to diagnostics_relay!",
             "returncode": 1,

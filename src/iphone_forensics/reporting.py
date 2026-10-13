@@ -727,6 +727,23 @@ def _coverage_charts(report: dict[str, Any]) -> str:
     )
 
 
+def _provenance_section(rows: list[list[Any]], note: str) -> str:
+    """Read-only signals that speak to ownership and prior use.
+
+    Rendered under device identity because these answer "whose phone was this, and
+    what was it doing before I got it" — the questions a buyer asks first. Every row
+    ships with the limit that keeps it from being read as a verdict.
+    """
+    if not rows:
+        return ""
+    return (
+        "<h3>Provenance and prior use (read-only queries)</h3>"
+        + _table(["Signal", "Reported", "What it means", "What it cannot establish"],
+                 rows, "No provenance signals collected.")
+        + (f"<p class='muted'>{esc(note)}</p>" if note else "")
+    )
+
+
 def _dashboard(report: dict[str, Any], redact_identifiers: bool = False) -> str:
     """Executive dashboard rendered directly under section 1.
 
@@ -1554,6 +1571,37 @@ def build_html(run_dir: Path, report: dict[str, Any], redact_identifiers: bool =
         for key in important
         if device.get(key) is not None
     ]
+    # Read-only provenance signals (activation state, developer mode, accessories).
+    # Each carries its own interpretation and limits alongside the value, because a
+    # bare "Activated" or a mounted-image flag means nothing without them.
+    provenance = report.get("provenance")
+    provenance_rows: list[list[Any]] = []
+    provenance_note = ""
+    if isinstance(provenance, dict) and provenance:
+        labels = {
+            "activation_state": "Activation state (host query)",
+            "mounted_images": "DeveloperDiskImage mounted",
+            "developer_mode": "Developer Mode",
+            "companion_devices": "Paired companion devices",
+        }
+        for key, label in labels.items():
+            entry = provenance.get(key)
+            if not isinstance(entry, dict):
+                continue
+            value = entry.get("value")
+            provenance_rows.append(
+                [
+                    label,
+                    value if value else NOT_COLLECTED,
+                    entry.get("interpretation", ""),
+                    entry.get("limits", ""),
+                ]
+            )
+        provenance_note = (
+            "These are read-only queries. None of them proves a claim about ownership, "
+            "repair history, or authenticity; each row states what it cannot establish."
+        )
+
     config_rows = [
         [
             key,
@@ -1856,6 +1904,7 @@ footer{{margin-top:30px;padding-top:16px;border-top:1px solid var(--line);color:
 <section class="panel"><h2>2. Device identity and configuration</h2>
 <h3>Identity, as reported by iOS</h3>{_table(["Field", "Reported value"], identity_rows, "No parsed identity fields. Check collected metadata and Settings → General → About.")}
 <p class="muted">Identifiers such as serial number, IMEI and UDID are sensitive. Reported values are not cryptographic proof of authenticity.{" This HTML export masks identifiers; the private JSON and evidence remain unredacted." if redact_identifiers else ""}</p>
+{_provenance_section(provenance_rows, provenance_note)}
 <h3>Change since the previous inspection</h3>{_table(["Field", "Previous", "Current", "Assessment"], comparison_rows, "No previous report was supplied for comparison.")}</section>
 {hardware_sections}
 {integrity_section}

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import datetime as dt
 import plistlib
 import re
 import shutil
 from pathlib import Path
 from typing import Any
 
+from .readonly import enforce_read_only
 from .util import run_command, safe_name, write_command_result
 
 LIB_TOOLS = [
@@ -117,8 +119,14 @@ def save_result(
     skip: bool = False,
     denial_markers: tuple[str, ...] | None = None,
     unsupported_markers: tuple[str, ...] | None = None,
+    enforce_read_only_check: bool = True,
 ) -> dict[str, Any]:
     """Run one bounded command, record its outcome, and return the raw result.
+
+    Every command spawned here is a device command and is checked against the
+    read-only allowlist before it runs. `collect_device` is the only caller, and all
+    of its commands are queries, so a refusal here means a mutating form has been
+    introduced — which is exactly the accident worth stopping.
 
     skip=True records a skipped_by_user entry and never spawns a subprocess.
     denial_markers enables a conservative permission_denied reclassification: the
@@ -150,7 +158,24 @@ def save_result(
             "duration_seconds": 0.0,
             "timed_out": False,
         }
-    result = run_command(command, timeout=timeout)
+    # The read-only check lives in `util.run_command`, not here, so it cannot be
+    # skipped by a caller that stubs `run_command` to probe behaviour. `save_result`
+    # is the one place that must never be able to spawn a mutating command, so it
+    # also checks directly; the duplicate call is cheap and the guarantee is not.
+    #
+    # `enforce_read_only_check=False` exists for exactly one purpose: tests that use a
+    # host binary such as `python -c 'pass'` as a stand-in for a device tool, to
+    # exercise exit-code handling. `collect_device` never passes it, and
+    # test_readonly_guard.py::test_save_result_cannot_be_told_to_skip_the_guard
+    # pins that.
+    if enforce_read_only_check:
+        enforce_read_only(command)
+    result = run_command(
+        command,
+        timeout=timeout,
+        device_command=enforce_read_only_check,
+        enforce=enforce_read_only_check,
+    )
     meta = write_command_result(raw, name, result)
     if denial_markers and meta["status"] == "collection_error":
         text = (
@@ -233,15 +258,13 @@ def discover_devices(raw: Path, collection: list[dict[str, Any]]) -> list[str]:
     found: list[str] = []
     idevice_id = shutil.which("idevice_id")
     if idevice_id:
-        res = save_result(
-            raw, collection, "connected-devices-libimobiledevice", [idevice_id, "-l"], 15
-        )
+        # Guarded separately from save_result: this runs before any run directory
+        # exists, so a refusal must fail the probe rather than be recorded as a gap.
+        res = run_command([idevice_id, "-l"], timeout=15, device_command=True)
         found.extend(line.strip() for line in decode(res["stdout"]).splitlines() if line.strip())
     pmd = shutil.which("pymobiledevice3")
     if pmd:
-        res = save_result(
-            raw, collection, "connected-devices-pymobiledevice3", [pmd, "usbmux", "list"], 20
-        )
+        res = run_command([pmd, "usbmux", "list"], timeout=20, device_command=True)
         text = decode(res["stdout"]) + "\n" + decode(res["stderr"])
         found.extend(
             re.findall(
@@ -324,6 +347,100 @@ def collect_capabilities(raw: Path, report: dict[str, Any]) -> None:
     )
 
 
+def collect_provenance(
+    raw: Path,
+    collection: list[dict[str, Any]],
+    report: dict[str, Any],
+    udid: str,
+    pmd: str,
+    prefix: list[str],
+) -> None:
+    """Query the read-only signals a buyer cares about most, and skip the rest.
+
+    Every command here is a *query*. None of them mounts, writes, pairs, activates,
+    or changes a setting, and each is checked against the read-only allowlist by
+    `save_result` before it runs. The three signals worth the effort:
+
+      * **Activation state** — whether the device is still tied to an Apple ID. This
+        is the single most consequential thing a buyer needs to know and the one the
+        capability matrix previously could only answer with "ask a human". It stays
+        a *partial* answer: a clean state on a Mac is evidence, but only the full
+        erase-and-reactivate cycle on the device decides, and the report says so.
+      * **Developer Disk Image / developer mode** — a mounted DDI or an enabled
+        developer mode is a strong hint that this phone was previously used for
+        development or jailbreak work. Hints, not verdicts.
+      * **Companion devices** — paired Watches and AirPods are accessory history the
+        seller may not have thought to mention.
+    """
+    report.setdefault("provenance", {})
+    provenance = report["provenance"]
+
+    activation = save_result(
+        raw, collection, "activation-state", [*prefix, "activation", "state"], 30
+    )
+    text = decode(activation["stdout"])
+    state = ""
+    for line in text.splitlines():
+        if ":" in line:
+            key, _, value = line.partition(":")
+            if key.strip().lower() in {"activationstate", "activation state"}:
+                state = value.strip()
+    provenance["activation_state"] = {
+        "value": state or None,
+        "raw": text.strip()[:2000],
+        "collected": bool(state),
+        "interpretation": (
+            "Activation state as reported by the device over lockdown. A non-empty "
+            "value is evidence about the device's account state; it is not proof of "
+            "ownership, and only the seller's erase plus your own reactivation "
+            "decides the question."
+        ),
+        "limits": (
+            "Never claim Activation Lock is clear from this alone. A Mac-side query "
+            "does not exercise the full Setup Assistant flow that a real reactivation "
+            "would, and the device can report differently before and after an erase."
+        ),
+    }
+
+    for tool, arg, key in (
+        ("ideviceimagemounter", "list", "mounted_images"),
+        ("ideviceimagemounter", "devmodestatus", "developer_mode"),
+    ):
+        path = shutil.which(tool)
+        if not path:
+            continue
+        result = save_result(raw, collection, f"imagemounter-{arg}", [path, "-u", udid, arg], 30)
+        body = decode(result["stdout"]).strip()
+        provenance[key] = {
+            "value": body or None,
+            "raw": body[:2000],
+            "interpretation": (
+                "DeveloperDiskImage state reported by the device. A mounted image or "
+                "an enabled developer mode hints at prior development or jailbreak "
+                "activity."
+                if key == "mounted_images"
+                else "Developer Mode status reported by the device."
+            ),
+            "limits": (
+                "A hint, not a verdict. Developer use is legitimate and a mounted image "
+                "does not establish a jailbreak, a repair, or a parts change."
+            ),
+        }
+
+    if pmd:
+        companions = save_result(raw, collection, "companion-devices", [*prefix, "companion", "list"], 30)
+        body = decode(companions["stdout"]).strip()
+        provenance["companion_devices"] = {
+            "value": body or None,
+            "raw": body[:2000],
+            "interpretation": (
+                "Accessories the device reports as paired. Useful background, and a "
+                "reminder to unpair them before setup if they belong to the seller."
+            ),
+            "limits": "Not evidence of tampering; pairing state alone proves nothing.",
+        }
+
+
 def collect_device(args: Any, run_dir: Path, raw: Path, report: dict[str, Any], udid: str) -> None:
     collection = report["collection"]
     if shutil.which("idevicepair"):
@@ -381,7 +498,34 @@ def collect_device(args: Any, run_dir: Path, raw: Path, report: dict[str, Any], 
         if isinstance(parsed_disk, dict) and parsed_disk:
             device = {**device, **parsed_disk}
 
+    # Two declared-but-never-invoked tools. Both print with no flags; the mutating
+    # forms (`idevicedate -c`, `idevicename <name>`) are deliberately not used and
+    # are refused by the read-only allowlist if anyone reaches for them.
+    for tool, key in (("idevicedate", "DeviceTime"), ("idevicename", "DeviceName")):
+        path = shutil.which(tool)
+        if not path:
+            continue
+        result = save_result(raw, collection, f"device-{tool}", [path, "-u", udid], 20)
+        value = decode(result["stdout"]).strip()
+        if value:
+            device = {**device, key: value}
+
     report["device"] = device
+
+    # Device clock vs host clock. A large skew is a weak hint that the clock was set
+    # manually — which is a legitimate thing to have done, and never proof of
+    # tampering on its own.
+    device_time = device.get("DeviceTime")
+    if isinstance(device_time, str) and device_time.strip():
+        report["clock_skew"] = {
+            "device_time": device_time.strip(),
+            "host_time": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "note": (
+                "Compare the device clock with the host clock. A skew of minutes is "
+                "normal; a skew of days suggests the clock was set by hand, which is "
+                "a hint about setup history and not a finding."
+            ),
+        }
 
     diagnostics = shutil.which("idevicediagnostics")
     report.setdefault("diagnostic_candidates", [])
@@ -445,7 +589,10 @@ def collect_device(args: Any, run_dir: Path, raw: Path, report: dict[str, Any], 
             from .util import capture_stream, write_command_result
 
             result = capture_stream(
-                [tool, "-u", udid], args.syslog_seconds, raw / "live-syslog.txt"
+                [tool, "-u", udid],
+                args.syslog_seconds,
+                raw / "live-syslog.txt",
+                device_command=True,
             )
             collection.append(write_command_result(raw, "live-syslog", result))
         else:
@@ -493,6 +640,7 @@ def collect_device(args: Any, run_dir: Path, raw: Path, report: dict[str, Any], 
         return
     prefix = _pmd_prefix(pmd, udid, report)
     save_result(raw, collection, "pymobiledevice3-version", [pmd, "version"], 20)
+    collect_provenance(raw, collection, report, udid, pmd, prefix)
     if args.pmd_app_list:
         save_result(
             raw, collection, "installed-apps-pymobiledevice3", [*prefix, "apps", "list"], 90
@@ -516,6 +664,7 @@ def collect_device(args: Any, run_dir: Path, raw: Path, report: dict[str, Any], 
             [*prefix, "syslog", "live"],
             args.pmd_syslog_seconds,
             raw / "pymobiledevice3-live-syslog.txt",
+            device_command=True,
         )
         collection.append(write_command_result(raw, "pymobiledevice3-live-syslog", result))
     if args.backup == "pymobiledevice3":
