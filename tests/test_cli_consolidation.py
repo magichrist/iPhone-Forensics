@@ -466,7 +466,9 @@ def test_consent_never_enables_more_than_was_chosen(argv, ticked, expected_on):
 
 def test_yes_sensitive_still_wins_when_combined_with_an_explicit_flag():
     """Blanket consent plus a named collector still means blanket."""
-    enabled, _engine = _consented_collectors(["inspect", "--yes-sensitive", "--crash-reports"], None)
+    enabled, _engine = _consented_collectors(
+        ["inspect", "--yes-sensitive", "--crash-reports"], None
+    )
     assert all(enabled.values())
 
 

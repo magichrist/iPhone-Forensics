@@ -670,8 +670,11 @@ def _provenance_section(rows: list[list[Any]], note: str) -> str:
         return ""
     return (
         "<h3>Provenance and prior use (read-only queries)</h3>"
-        + _table(["Signal", "Reported", "What it means", "What it cannot establish"],
-                 rows, "No provenance signals collected.")
+        + _table(
+            ["Signal", "Reported", "What it means", "What it cannot establish"],
+            rows,
+            "No provenance signals collected.",
+        )
         + (f"<p class='muted'>{esc(note)}</p>" if note else "")
     )
 
@@ -711,11 +714,18 @@ def _dashboard(report: dict[str, Any], redact_identifiers: bool = False) -> str:
     completeness_rows = [
         ["Automated verdict", _val(assessment.get("verdict"))],
         ["Assessment status", _val(assessment.get("status"))],
-        ["Collectors completed",
-         _ratio(assessment.get("collection_successful"), assessment.get("collection_total"))],
+        [
+            "Collectors completed",
+            _ratio(assessment.get("collection_successful"), assessment.get("collection_total")),
+        ],
         ["Failed or partial collectors", _val(assessment.get("collection_failed_or_partial"))],
-        ["Identity fields present",
-         _ratio(assessment.get("identity_fields_present"), assessment.get("identity_fields_expected"))],
+        [
+            "Identity fields present",
+            _ratio(
+                assessment.get("identity_fields_present"),
+                assessment.get("identity_fields_expected"),
+            ),
+        ],
     ]
 
     metrics = _measured_metrics(report)

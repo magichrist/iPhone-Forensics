@@ -209,9 +209,7 @@ def test_guard_raises_before_spawning(tmp_path: Path) -> None:
     from iphone_forensics.util import run_command
 
     with pytest.raises(ReadOnlyViolation):
-        run_command(
-            [f"{BIN}/idevicedate", "-u", UDID, "-c"], timeout=5, device_command=True
-        )
+        run_command([f"{BIN}/idevicedate", "-u", UDID, "-c"], timeout=5, device_command=True)
 
 
 def test_capture_stream_is_guarded_too() -> None:
@@ -257,7 +255,9 @@ def test_save_result_cannot_be_told_to_skip_the_guard_by_accident() -> None:
 
     from iphone_forensics import collectors
 
-    default = inspect.signature(collectors.save_result).parameters["enforce_read_only_check"].default
+    default = (
+        inspect.signature(collectors.save_result).parameters["enforce_read_only_check"].default
+    )
     assert default is True
 
 
@@ -272,8 +272,11 @@ def test_collect_device_never_passes_the_bypass() -> None:
 
     from iphone_forensics import collectors
 
-    for func in (collectors.collect_device, collectors.collect_provenance,
-                 collectors.discover_devices):
+    for func in (
+        collectors.collect_device,
+        collectors.collect_provenance,
+        collectors.discover_devices,
+    ):
         source = inspect.getsource(func)
         assert "enforce_read_only_check=False" not in source, func.__name__
         assert "enforce=False" not in source, func.__name__

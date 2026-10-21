@@ -428,7 +428,9 @@ def collect_provenance(
         }
 
     if pmd:
-        companions = save_result(raw, collection, "companion-devices", [*prefix, "companion", "list"], 30)
+        companions = save_result(
+            raw, collection, "companion-devices", [*prefix, "companion", "list"], 30
+        )
         body = decode(companions["stdout"]).strip()
         provenance["companion_devices"] = {
             "value": body or None,

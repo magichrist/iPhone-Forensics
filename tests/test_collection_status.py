@@ -65,7 +65,12 @@ def test_success_exit_maps_to_collected(tmp_path: Path):
 def test_nonzero_exit_maps_to_collection_error(tmp_path: Path):
     collection: list[dict] = []
     save_result(
-        tmp_path, collection, "always-fails", [sys.executable, "-c", "raise SystemExit(3)"], 15, **HOST
+        tmp_path,
+        collection,
+        "always-fails",
+        [sys.executable, "-c", "raise SystemExit(3)"],
+        15,
+        **HOST,
     )
     entry = collection[0]
     assert entry["status"] == "collection_error"
@@ -112,7 +117,6 @@ def test_missing_binary_via_write_command_result_directly(tmp_path: Path):
 
 
 # --------------------------------------------------------------------- timeout -> collection_error
-
 
 
 @POSIX_ONLY
@@ -304,9 +308,7 @@ def test_legacy_strings_are_never_emitted(tmp_path: Path):
         tmp_path, collection, "bad", [sys.executable, "-c", "raise SystemExit(2)"], 15, **HOST
     )
     save_result(tmp_path, collection, "missing", ["definitely-not-a-real-binary-xyz"], 5, **HOST)
-    save_result(
-        tmp_path, collection, "skip", [sys.executable, "-c", "pass"], 15, skip=True, **HOST
-    )
+    save_result(tmp_path, collection, "skip", [sys.executable, "-c", "pass"], 15, skip=True, **HOST)
     for entry in collection:
         assert entry["status"] not in {"success", "expected_end", "failed_or_partial"}
 
@@ -341,9 +343,7 @@ def test_write_command_result_override_paths(tmp_path: Path):
 
 def test_save_result_never_raises_on_bogus_input(tmp_path: Path):
     collection: list[dict] = []
-    save_result(
-        tmp_path, collection, "nope", ["definitely-not-a-real-binary-xyz"], 1, **HOST
-    )
+    save_result(tmp_path, collection, "nope", ["definitely-not-a-real-binary-xyz"], 1, **HOST)
     save_result(tmp_path, collection, "nope-skip", ["whatever"], 1, skip=True)
     assert len(collection) == 2
     for entry in collection:
