@@ -516,8 +516,11 @@ def test_declined_consent_is_never_rendered_as_a_failure(tmp_path: Path):
         }
     )
     html = _render(tmp_path, report)
-    assert "declined" in html.lower()
-    assert "not</b> collected" in html or "not collected" in html.lower()
+    # Declining never raises the incomplete banner and never becomes a device finding.
+    assert "<section class='panel banner-incomplete'" not in html
+    assert "declined" not in html.lower(), "a declined consent must not render as a defect"
+    # The consent record lives in report.json (machine-readable), not in prose.
+    assert report["scope"]["sensitive_collection"] == "declined"
 
 
 def test_redaction_is_one_helper_with_absence_still_reads_as_absent():
@@ -589,7 +592,7 @@ def test_every_finding_reaching_a_real_report_is_labeled(tmp_path: Path):
             {
                 "severity": "REVIEW",
                 "title": "Cellular signal strength",
-                "detail": "Compare against a reference in Settings.",
+                "detail": "Manual check: compare against a reference in Settings.",
                 "evidence": [],
             },
         ]
@@ -638,11 +641,11 @@ def test_epistemic_badges_carry_text_not_colour_alone(tmp_path: Path):
     assert "Unknown — open question" in html
 
 
-# ============================================ 6. report outline (docs/v5/04, §4C)
+# ============================================ 6. report outline (brief contract)
 
 
-def test_report_has_a_working_table_of_contents(tmp_path: Path):
-    """Every TOC entry must resolve to a section that actually rendered."""
+def test_report_has_no_table_of_contents_or_anchors(tmp_path: Path):
+    """The brief report is one short page: no TOC, no anchors, no skip-link."""
     report = _completed_report(
         hardware_assessment={"subsystems": {"battery": "pass"}, "checks": [], "warnings": []},
         integrity_assessment={
@@ -654,29 +657,21 @@ def test_report_has_a_working_table_of_contents(tmp_path: Path):
     )
     html = _render(tmp_path, report)
 
-    assert "<nav" in html and "skip-link" in html
-    ids = set(re.findall(r"""id=['"]([^'"]+)['"]""", html))
-    links = set(re.findall(r"""href=['"]#([^'"]+)['"]""", html))
-    assert links, "the table of contents must link somewhere"
-    assert links <= ids, f"dangling anchors: {sorted(links - ids)}"
-
-    # Every section is both a link target and announced by its heading.
-    chains = re.findall(r"""aria-labelledby=['"]([^'"]+)['"]""", html)
-    assert chains and all(chain in ids for chain in chains)
+    assert "<nav" not in html, "the brief report does not need navigation"
+    assert "skip-link" not in html
+    assert not re.findall(r"""href=['"]#s\d+-""", html), "no section anchors are rendered"
 
 
 def test_toc_never_lists_a_section_that_did_not_render(tmp_path: Path):
-    """An absent panel must not leave a dead entry in the contents list."""
-    import re as _re
-
+    """Nothing may be declared in the outline and then never rendered."""
     from iphone_forensics.reporting import SECTION_TITLES
 
     html = _render(tmp_path, _completed_report())
-    links = set(_re.findall(r"""href=['"]#(s\d+-[^'"]+)['"]""", html))
-    # No hardware/integrity data was supplied, so sections 3-5 must be absent
-    # from the contents as well as from the body.
-    assert not any(link.startswith(("s3-", "s4-", "s5-")) for link in links)
-    assert len(links) == len([t for t in SECTION_TITLES]) - 3
+    rendered = re.findall(r"<h2>(\d+)\.\s*([^<]+)</h2>", html)
+    titles = [title.strip() for _, title in rendered]
+    assert titles == list(SECTION_TITLES), (
+        f"every declared section must render exactly once: {titles}"
+    )
 
 
 def test_report_is_dark_mode_and_reduced_motion_aware(tmp_path: Path):
@@ -704,12 +699,12 @@ def test_report_stays_offline_and_script_free(tmp_path: Path):
 
 
 def test_report_renders_the_section_outline_in_order(tmp_path: Path):
-    """Exactly 9 numbered sections, in order, numbered 1..9 without gaps.
+    """Exactly 5 numbered sections, in order, numbered 1..5 without gaps.
 
-    Two sections were removed (the buyer checklist and the technical appendix), so the
-    outline shrank from 11 to 9. The numbering is asserted explicitly rather than
-    derived from `len(SECTION_TITLES)`, because a test that computes its own
-    expectation from the thing it is checking proves nothing about renumbering.
+    The brief-report contract cut the outline to five: the numbering is asserted
+    explicitly rather than derived from `len(SECTION_TITLES)`, because a test that
+    computes its own expectation from the thing it is checking proves nothing
+    about renumbering.
     """
     import re
 
@@ -731,19 +726,19 @@ def test_report_renders_the_section_outline_in_order(tmp_path: Path):
         },
     )
     html = _render(tmp_path, report)
-    # Headings carry an id (added for deep links); match it optionally.
-    headings = re.findall(r"<h2(?: id='[^']*')?>(\d+)\.\s*([^<]+)</h2>", html)
+    headings = re.findall(r"<h2>(\d+)\.\s*([^<]+)</h2>", html)
 
     rendered = [title.strip() for _, title in headings]
     assert rendered == list(SECTION_TITLES), f"outline drifted: {rendered}"
-    assert [number for number, _ in headings] == [str(n) for n in range(1, 10)]
+    assert [number for number, _ in headings] == [str(n) for n in range(1, 6)]
 
 
 def test_removed_sections_are_never_rendered(tmp_path: Path):
-    """The buyer checklist and technical appendix must not come back.
+    """The verbose-report boilerplate must not come back.
 
-    Guards against a future edit reintroducing either section, and pins the fact that
-    the section count is 9 rather than 11.
+    Guards against a future edit reintroducing the removed verbosities: the
+    how-to-read tutorial, the whole-project capability matrix, charts, and the
+    numbered v5 verbose sections.
     """
     html = _render(tmp_path, _completed_report())
     for gone in (
@@ -753,30 +748,33 @@ def test_removed_sections_are_never_rendered(tmp_path: Path):
         "Buyer-entered observations",
         "Technical appendix",
         "Toolchain and evidence integrity",
+        "How to read this report",
+        "Unknown, unavailable, unsupported and skipped tests",
+        "Coverage by category",
+        "Executive dashboard",
     ):
         assert gone not in html, f"{gone!r} is rendered again"
-    assert "8. Risks, findings and actions" in html
-    assert "9. Evidence and coverage" in html
+    assert "<svg" not in html, "charts must stay gone"
+    # The brief sections ARE rendered, numbered.
+    assert "1. Summary" in html
+    assert "2. Findings" in html
+    assert "5. Collection gaps" in html
 
 
 def test_outline_survives_conditional_panels_being_absent(tmp_path: Path):
-    """Sections 3-5 render only when that data exists; the rest must not shift."""
+    """All five sections always render; empty data becomes one honest line, never a shell."""
     import re
 
     from iphone_forensics.reporting import SECTION_TITLES
 
     html = _render(tmp_path, _completed_report())
-    rendered = [
-        title.strip() for title in re.findall(r"<h2(?: id='[^']*')?>\d+\.\s*([^<]+)</h2>", html)
-    ]
+    rendered = [title.strip() for title in re.findall(r"<h2>\d+\.\s*([^<]+)</h2>", html)]
 
-    # No hardware/integrity data -> those panels are absent, never empty shells.
-    assert "Hardware and components" not in rendered
-    assert "Parts, repairs and integrity" not in rendered
-    # The remaining sections keep their declared numbers.
-    for expected in ("Executive summary", "Evidence and coverage"):
-        assert expected in rendered
-    assert set(rendered).issubset(set(SECTION_TITLES))
+    # The outline is stable whether or not hardware/integrity data exists.
+    assert rendered == list(SECTION_TITLES)
+    # No hardware/integrity data -> one "not collected" line, no empty tables.
+    assert "hardware and battery: not collected" in html
+    assert "comparison: not collected" in html
 
 
 def test_every_section_title_is_referenced_by_the_rendered_report(tmp_path: Path):
@@ -806,8 +804,9 @@ def test_every_section_title_is_referenced_by_the_rendered_report(tmp_path: Path
         argparse.Namespace(redact=False, compare_json=None),
     )
     html = (paths["run_dir"] / "report.html").read_text(encoding="utf-8")
-    assert "Hardware and components" in html
-    assert "Battery and power" in html
+    # The brief outline renders the real-measurement data the run produced.
+    assert "4. Hardware, battery and integrity" in html
+    assert "not_tested" in html
 
 
 # ============================================ 7. savvy-user surface (docs/v5/02)
@@ -872,10 +871,16 @@ def test_advanced_help_stays_out_of_the_basic_help():
 
 
 def test_v4_deep_links_still_land_on_the_right_section(tmp_path: Path):
-    """docs/v5/10 risk mitigation: the section renumber must not orphan old links."""
+    """docs/v5/10 risk mitigation, reinterpreted for the brief report.
+
+    Anchors and the TOC are gone with the verbose report. The SECTION_ALIASES table
+    is now the mapping external tooling uses to relocate a legacy heading onto a
+    brief-report section: every target must be a declared section, the report must
+    render exactly those sections, and no legacy verbose heading may return.
+    """
     import re as _re
 
-    from iphone_forensics.reporting import SECTION_ALIASES
+    from iphone_forensics.reporting import SECTION_ALIASES, SECTION_TITLES
 
     report = _completed_report(
         hardware_assessment={"subsystems": {"battery": "not_tested"}, "checks": [], "warnings": []},
@@ -888,16 +893,28 @@ def test_v4_deep_links_still_land_on_the_right_section(tmp_path: Path):
     )
     html = _render(tmp_path, report)
 
-    ids = set(_re.findall(r"""id=['"]([^'"]+)['"]""", html))
-    for old_heading, new_heading in SECTION_ALIASES:
-        expected = _slug = old_heading.lower().replace("(", "").replace(")", "")
-        expected = re.sub(r"[^a-z0-9]+", "-", expected).strip("-")
-        assert expected in ids, f"old heading {old_heading!r} has no anchor"
+    for _old_heading, new_heading in SECTION_ALIASES:
+        assert new_heading in SECTION_TITLES, (
+            f"{new_heading!r} is aliased to but not declared in the outline"
+        )
 
-    # And the alias table is honest: every target really is a rendered section.
-    rendered = set(re.findall(r"<h2(?: id='[^']*')?>\d+\.\s*([^<]+)</h2>", html))
-    for _old, new in SECTION_ALIASES:
-        assert new in rendered, f"{new!r} is aliased to but never rendered"
+    rendered = {
+        title.strip() for _, title in _re.findall(r"<h2>(\d+)\.\s*([^<]+)</h2>", html)
+    }
+    assert rendered == set(SECTION_TITLES)
+    # No legacy verbose section heading may render again.
+    # ("Device identity and configuration" survives as a brief-section title.)
+    for gone in (
+        "Executive summary",
+        "Hardware and components",
+        "Battery and power",
+        "Parts, repairs and integrity",
+        "System integrity and configuration",
+        "Reliability and diagnostics",
+        "Risks, findings and actions",
+        "Evidence and coverage",
+    ):
+        assert gone not in html, f"legacy section heading {gone!r} rendered again"
 
 
 # =============================================== 8. collectors integration wiring

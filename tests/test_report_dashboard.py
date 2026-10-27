@@ -1,4 +1,4 @@
-"""v5 dashboard, inline-SVG charts, and HTML validator (docs/v5/04-html-report.md).
+"""v5.2 brief report: counts table, tables-only presentation, HTML validator (docs/v5/04-html-report.md).
 
 Covers:
   1. Dashboard counts equal a fresh recomputation from report.json.
@@ -272,21 +272,26 @@ def test_dashboard_shows_measured_metrics_only_when_present(tmp_path: Path):
         }
     )
     html2 = _render(tmp_path / "stripped", stripped)
-    assert f"Battery / storage metrics: {NOT_COLLECTED}" in html2
-    assert "Absent metrics are unknown, not normal" in html2
+    # An unmeasured check is an honest row, not a zero: status not_tested, value "not provided".
+    assert "not_tested" in html2
+    assert "not provided" in html2
+    assert "<td>None</td>" not in html2 and "<td>0</td>" not in html2
 
 
-def test_top_issues_prefer_blocker_and_warning(tmp_path: Path):
+def test_findings_table_prefers_severity_order(tmp_path: Path):
+    """The findings table keeps BLOCKER before WARNING before REVIEW, and drops INFO."""
     report = _copy(FULL_REPORT)
     html = _render(tmp_path, report)
     block = html.index("Activation Lock is active")
     warning = html.index("Battery cycle count is high")
     review = html.index("Storage capacity not independently confirmed")
-    assert block < warning < review, "top issues must be ordered by severity"
+    assert block < warning < review, "findings must be ordered by severity"
 
-    # Scope to the top-issues block itself: INFO findings belong in §11, not here.
-    issues_block = html.split("Top issues to resolve before purchase")[1].split("</table>")[0]
-    assert "Model matches advertised tier" not in issues_block, "INFO findings are not issues"
+    # Scope to the findings section itself: INFO findings stay out of the table.
+    table_block = html.split("2. Findings")[1].split("</section>")[0]
+    assert "Model matches advertised tier" not in table_block, "INFO findings are summary-only"
+    assert "INFO findings: 1" in html, "INFO presence is still disclosed as a count"
+    assert "Top issues" not in html, "the redundant top-issues panel is gone"
 
 
 # ------------------------------------------------------------- no data, no chart
@@ -297,11 +302,10 @@ def test_empty_report_renders_no_charts(tmp_path: Path):
     html = _render(tmp_path, _copy(EMPTY_REPORT))
     assert "<svg" not in html, "no data must mean no chart"
     assert "not collected" in html
-    assert "No checks were performed and no collectors were recorded" in html
-    assert "absence of data, not a pass" in html
+    assert "no findings recorded" in html
     # A zero-run must not read as a device with no problems.
-    assert "Top issues: none recorded" in html
-    assert "not a clean bill of health" in html
+    assert "not a certification" in html
+    assert "hardware and battery: not collected" in html
 
 
 def test_empty_report_shows_not_collected_for_every_bucket(tmp_path: Path):
@@ -316,7 +320,6 @@ def test_empty_report_shows_not_collected_for_every_bucket(tmp_path: Path):
 def test_no_invented_percentages_or_health_scores(tmp_path: Path):
     """Coverage must never be dressed up as a health or genuineness percentage."""
     html = _render(tmp_path, _copy(FULL_REPORT))
-    assert "Coverage is not health" in html
     for marker in ("health%", "genuine%", "authenticity score", "trust score"):
         assert marker not in html.lower(), f"invented score rendered: {marker}"
     # Check rendered copy only: the stylesheet legitimately contains CSS widths.
@@ -380,11 +383,11 @@ def test_malicious_strings_escaped_in_dashboard_and_charts(tmp_path: Path):
         assert payload not in html, f"unescaped payload leaked: {payload}"
     assert "&lt;script&gt;" in html
 
-    # The payload-bearing text must still be present, escaped, inside the dashboard.
-    dashboard = html.split("Executive dashboard")[1]
+    # The payload-bearing text must still be present, escaped, inside the findings table.
+    findings_section = html.split("2. Findings")[1].split("</section>")[0]
     assert (
-        "&lt;script&gt;alert(&#x27;title&#x27;)&lt;/script&gt;" in dashboard
-        or "&lt;script&gt;alert('title')&lt;/script&gt;" in dashboard
+        "&lt;script&gt;alert(&#x27;title&#x27;)&lt;/script&gt;" in findings_section
+        or "&lt;script&gt;alert('title')&lt;/script&gt;" in findings_section
     )
 
 
@@ -429,25 +432,18 @@ def test_output_contains_no_external_references(tmp_path: Path):
 
 
 def test_charts_carry_no_scripting(tmp_path: Path):
+    """The brief report renders no SVG at all; assert the nothing-to-check case is real."""
     html = _render(tmp_path, _copy(FULL_REPORT))
-    assert "<svg" in html, "the full fixture should render charts"
-    svg_blocks = re.findall(r"<svg.*?</svg>", html, flags=re.DOTALL)
-    assert svg_blocks, "expected at least one inline SVG chart"
-    for block in svg_blocks:
-        lowered = block.lower()
-        assert "javascript" not in lowered
-        assert "href" not in lowered
-        assert "<script" not in lowered
-        # Numbers belong in attributes only; labels are escaped text.
-        assert "onload=" not in lowered and "onclick=" not in lowered
+    assert "<svg" not in html
+    assert "<script" not in html.lower()
+    assert "onload=" not in html.lower() and "onclick=" not in html.lower()
 
 
-def test_every_chart_has_a_text_table_equivalent(tmp_path: Path):
-    """Print and screen-reader users need the numbers without the graphic."""
+def test_tables_are_the_only_presentation(tmp_path: Path):
+    """Every number lives in a table or an attribute — no duplicate chart renderings."""
     html = _render(tmp_path, _copy(FULL_REPORT))
-    for heading in ("Check outcomes", "Findings by severity", "Collector success"):
-        panel = html.split(f"<h3>{heading}</h3>")[1].split("</section>")[0]
-        assert "<table>" in panel, f"chart panel '{heading}' needs a text table equivalent"
+    assert "<svg" not in html
+    assert "<table>" in html
 
 
 # -------------------------------------------------------------------- validator
@@ -539,5 +535,5 @@ def test_redacted_export_still_contains_no_identifiers(tmp_path: Path):
     finalize(tmp_path, report, redact_identifiers=True)
     redacted_html = (tmp_path / "report-redacted.html").read_text(encoding="utf-8")
     assert "SERIALTOPSECRET1234" not in redacted_html
-    assert "Executive dashboard" in redacted_html, "the dashboard must survive redaction"
+    assert "Identifiers masked in this HTML export" in redacted_html
     assert "report-validation:" in redacted_html

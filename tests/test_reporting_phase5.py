@@ -14,11 +14,10 @@ Offline only: no device, no network, no toolchain.
 import re
 from pathlib import Path
 
-from iphone_forensics.buyer import CHECKLIST, template
-from iphone_forensics.capabilities import COVERAGE_LEVELS, coverage_counts, get_matrix
+from iphone_forensics.buyer import template
+from iphone_forensics.capabilities import get_matrix
 from iphone_forensics.reporting import (
     MISSING,
-    NOT_COLLECTED,
     SECTION_TITLES,
     build_html,
     esc,
@@ -85,7 +84,7 @@ def _html(tmp_path: Path, report: dict, **kwargs) -> str:
 
 
 def test_report_renders_all_fifteen_spec_sections_in_order(tmp_path: Path):
-    """Spec §12 order: executive summary ... limitations/next steps."""
+    """Brief outline order: summary, findings, device, hardware, collection gaps."""
     report = _report()
     report["hardware_assessment"] = {
         "subsystems": {"battery": "pass"},
@@ -110,18 +109,13 @@ def test_report_renders_all_fifteen_spec_sections_in_order(tmp_path: Path):
     assert positions == sorted(positions), "spec §12 sections must appear in order"
 
 
-def test_section_titles_cover_executive_summary_through_evidence():
-    """v5 outline, minus the two sections that were removed.
-
-    Was 11 sections. The buyer checklist (an instructional template for a reader who
-    is expected to know the domain) and the technical appendix (toolchain inventory
-    and standing limitations prose, identical on every device) are gone.
-    """
-    assert SECTION_TITLES[0] == "Executive summary"
-    assert SECTION_TITLES[-1] == "Evidence and coverage"
-    assert len(SECTION_TITLES) == 9
-    assert "Battery and power" in SECTION_TITLES
-    assert "Risks, findings and actions" in SECTION_TITLES
+def test_section_titles_cover_summary_through_collection_gaps():
+    """The brief outline: five sections, from the verdict down to collector gaps."""
+    assert SECTION_TITLES[0] == "Summary"
+    assert SECTION_TITLES[-1] == "Collection gaps"
+    assert len(SECTION_TITLES) == 5
+    assert "Findings" in SECTION_TITLES
+    assert "Hardware, battery and integrity" in SECTION_TITLES
     # The removed sections must not linger in the declared outline.
     assert "Buyer checklist" not in SECTION_TITLES
     assert "Technical appendix" not in SECTION_TITLES
@@ -177,10 +171,12 @@ def test_banner_shown_when_a_collector_failed(tmp_path: Path):
     assert "<section class='panel banner-incomplete'" in html, (
         "a failed collector must raise the banner"
     )
-    assert "INCOMPLETE COLLECTION" in html
-    # The banner must name the sections that cannot be evaluated, not just count failures.
-    assert "Diagnostic metric candidates" in html
+    assert "Incomplete collection" in html
+    # The banner must name the failing collector itself.
     assert "diagnostics-battery" in html
+    # Device-fault wording is reserved for collectors that ran and returned a
+    # negative result; the banner copy never calls a gap a device fault.
+    assert "not a device fault" in html
 
 
 def test_banner_shown_when_assessment_status_is_incomplete(tmp_path: Path):
@@ -251,36 +247,42 @@ def test_banner_escapes_untrusted_collector_names(tmp_path: Path):
     assert "&lt;script&gt;" in html
 
 
-# ------------------------------------------ unknown / unavailable / unsupported panel
+# -------------------------------------- whole-project capability matrix is out
 
 
-def test_unknown_panel_renders_counts_matching_coverage_counts(tmp_path: Path):
+def test_capability_matrix_is_not_rendered_in_the_report(tmp_path: Path):
+    """The brief report carries no device-independent project boilerplate.
+
+    The whole-project capability matrix (unsupported / manual / partial tables,
+    identical on every run) was cut per the v5.2 brief-report contract. The honest
+    exceptions live in capabilities.py and in `ipad... --capabilities`; the report
+    records only what THIS run actually measured or failed to collect.
+    """
     html = _html(tmp_path, _report())
-    assert "Unknown, unavailable, unsupported and skipped tests" in html
-    counts = coverage_counts()
-    for level in COVERAGE_LEVELS:
-        # Counts are rendered as "<b>level</b>: N" inside a list item.
-        assert f"<b>{level}</b>: {counts[level]}</li>" in html, f"missing count for {level}"
-
-
-def test_unknown_panel_lists_unsupported_and_manual_items(tmp_path: Path):
-    html = _html(tmp_path, _report())
-    assert "Can never be established in software" in html
-    assert "Requires a guided manual test" in html
+    assert "Unknown, unavailable, unsupported and skipped tests" not in html
+    assert "Can never be established in software" not in html
+    assert "Requires a guided manual test" not in html
+    assert "Coverage by category" not in html
+    # Nothing from the static matrix leaks into the HTML.
     for row in get_matrix():
         if row["coverage"] in {"manual", "unsupported"}:
-            # Matrix text is escaped like any other untrusted field.
-            assert esc(row["item"]) in html, f"matrix item absent from panel: {row['item']}"
+            assert esc(row["item"]) not in html, f"matrix item rendered: {row['item']}"
 
 
-def test_unknown_panel_names_unsupported_honest_limits(tmp_path: Path):
+def test_impossible_capabilities_are_not_claimed_by_the_report(tmp_path: Path):
+    """Cutting the matrix must not cut the guarantee: the report never suggests
+    that it could establish an impossible claim either.
+
+    The report renders device findings only; the standing limitation is enforced by
+    `_audit_claim_matrix` and surfaced once in the footer.
+    """
     html = _html(tmp_path, _report())
-    # The two capabilities the matrix declares as impossible must be called out as such.
-    assert "Water resistance / opened-before" in html
-    assert "Component originality / parts pairing state" in html
+    assert "Water resistance" not in html.replace("&nbsp;", " ")
+    # The footer still carries the standing limitations, once, in one line.
+    assert "no authenticity / replacement / health verdicts" in html
 
 
-def test_unknown_panel_lists_failed_collectors_as_skipped(tmp_path: Path):
+def test_gaps_table_names_this_run_skipped_collectors(tmp_path: Path):
     report = _report(
         collection=[
             {
@@ -295,20 +297,20 @@ def test_unknown_panel_lists_failed_collectors_as_skipped(tmp_path: Path):
         ]
     )
     html = _html(tmp_path, report)
-    assert "Skipped / unavailable in this specific run" in html
+    assert "5. Collection gaps" in html
     assert "crash-report-copy" in html
 
 
-def test_unknown_panel_empty_state_when_all_collectors_succeeded(tmp_path: Path):
+def test_gaps_table_empty_state_when_all_collectors_succeeded(tmp_path: Path):
     html = _html(tmp_path, _report())
-    assert "Every collector produced usable evidence" in html
+    assert "all 1 collector steps produced usable evidence" in html
 
 
 # ------------------------------------------------------ missing != 0 / missing != false
 
 
 def test_absent_assessment_counts_are_not_rendered_as_zero(tmp_path: Path):
-    """An assessment with no counts must read 'not provided', not 0 — 0 is a claim."""
+    """An assessment with no counts must read 'not collected/not provided', not 0."""
     report = _report(
         assessment={
             "status": "incomplete",
@@ -318,18 +320,15 @@ def test_absent_assessment_counts_are_not_rendered_as_zero(tmp_path: Path):
         }
     )
     html = _html(tmp_path, report)
-    stats = html[html.index('<div class="stats">') : html.index('<p class="callout">')]
-    tiles = dict(re.findall(r'<span class="muted">(.*?)</span><b>(.*?)</b>', stats, re.DOTALL))
-    # A ratio is only a ratio when both halves exist. Rendering `_val` twice used to
-    # emit the literal "not provided/not provided" here — two honest placeholders
-    # concatenated into something that reads as a broken fraction. An absent pair is
-    # one fact, stated once.
-    assert tiles["Collectors completed"] == NOT_COLLECTED
-    assert tiles["Failed / partial"] == MISSING
-    assert tiles["Identity fields"] == NOT_COLLECTED
-    assert tiles["Checklist passed"] == f"{MISSING}/{len(CHECKLIST)}"
-    # Regression guard: the old serializer emitted hardcoded 0 / 4 / 21 baselines here.
-    for label, value in tiles.items():
+    summary = html[html.index("Outcome and completeness") : html.index('<p class="muted">findings')]
+    rows = dict(re.findall(r"<td>(.*?)</td><td>(.*?)</td>", summary, re.DOTALL))
+    # A ratio is only a ratio when both halves exist. Absent halves render one
+    # honest placeholder — never "not provided/not provided" or a hardcoded 0/4.
+    assert rows["collectors completed"] == MISSING
+    assert rows["collector gaps"] == MISSING
+    assert rows["identity fields"] == MISSING
+    # Regression guard: no field may silently default to a baseline number.
+    for label, value in rows.items():
         assert not re.search(r"(^|/)(0|4)$", value), (
             f"'{label}' still defaults to a number: {value}"
         )
@@ -339,21 +338,27 @@ def test_missing_collection_telemetry_renders_not_provided(tmp_path: Path):
     """A collector with no recorded exit code/bytes is unknown, not 0."""
     report = _report(collection=[{"name": "mystery-collector", "status": "failed_or_partial"}])
     html = _html(tmp_path, report)
-    # Anchor inside the "10. Evidence and coverage" table, not the banner (which also
-    # names the failed collector).
-    coverage_start = html.index("9. Evidence and coverage")
-    row_start = html.index("mystery-collector", coverage_start)
+    # Anchor inside the gaps table, not the banner (which also names the collector).
+    gaps_start = html.index("5. Collection gaps")
+    row_start = html.index("mystery-collector", gaps_start)
     row = html[row_start : html.index("</tr>", row_start)]
     assert MISSING in row
     assert "<td>0</td>" not in row
 
 
-def test_missing_crash_triage_counts_are_not_rendered_as_zero(tmp_path: Path):
+def test_crash_triage_absence_is_never_rendered_as_a_zero(tmp_path: Path):
+    """Crash triage moved wholly to report.json in the brief report.
+
+    The HTML renders no "Files scanned: 0" line for a run that collected nothing:
+    an absent count stays absent. This test pins the invariant at the JSON layer,
+    where the data still lives.
+    """
     report = _report(crash_triage={"interpretation": "Triage ran."})
     html = _html(tmp_path, report)
-    triage_start = html.index("Crash and panic triage")
-    line = html[triage_start : html.index("</p>", html.index("Files scanned", triage_start))]
-    assert "Files scanned: not provided" in line
+    assert "Files scanned" not in html
+    assert "Triage ran." not in html
+    # The data is untouched in the report payload.
+    assert report["crash_triage"].get("files_scanned") is None
 
 
 def test_missing_buyer_observations_are_not_zero(tmp_path: Path):
@@ -459,10 +464,11 @@ def test_redacted_exports_still_mask_identifiers(tmp_path: Path):
         assert SERIAL not in text, f"{name} leaked SerialNumber"
         assert IMEI not in text, f"{name} leaked IMEI"
         assert UDID not in text, f"{name} leaked UDID"
-    # The unknown panel must still render in the redacted HTML export.
+    # The brief-report panels must still render in the redacted HTML export.
     redacted_html = (tmp_path / "report-redacted.html").read_text(encoding="utf-8")
-    assert "Unknown, unavailable, unsupported and skipped tests" in redacted_html
-    assert "Can never be established in software" in redacted_html
+    assert "2. Findings" in redacted_html
+    assert "5. Collection gaps" in redacted_html
+    assert "Identifiers masked in this HTML export" in redacted_html
 
 
 def test_private_report_keeps_full_identifiers(tmp_path: Path):

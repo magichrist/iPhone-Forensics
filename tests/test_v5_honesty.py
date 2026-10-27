@@ -249,8 +249,9 @@ def test_clean_metadata_never_means_malware_free(tmp_path: Path):
     )
     html = _html(tmp_path, report)
     assert not re.search(r"malware[- ]free|no malware|clean device", html, re.IGNORECASE)
-    # Absence of indicators is described as absence, with a false-positive caveat.
-    assert re.search(r"no indicators matched|does not mean", html, re.IGNORECASE)
+    # Crash triage moved wholly to report.json in the brief report; the HTML must
+    # not render a "no indicators" verdict over an empty scan either.
+    assert "no indicators" not in html.lower()
 
 
 def test_continuity_is_never_asserted_without_a_hardware_bound_identifier():
