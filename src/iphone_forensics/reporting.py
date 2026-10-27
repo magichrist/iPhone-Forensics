@@ -21,8 +21,8 @@ MISSING = "not provided"
 SECTION_TITLES: tuple[str, ...] = (
     "Summary",
     "Findings",
-    "Device",
-    "Hardware",
+    "Device identity and configuration",
+    "Hardware, battery and integrity",
     "Collection gaps",
 )
 
@@ -32,16 +32,16 @@ SECTION_TITLES: tuple[str, ...] = (
 # verbose outline still resolve to a sensible section name.
 SECTION_ALIASES: tuple[tuple[str, str], ...] = (
     ("Executive summary", "Summary"),
-    ("Device identity (reported by iOS)", "Device"),
-    ("Comparison with previous inspection", "Device"),
-    ("Diagnostic metric candidates", "Hardware"),
-    ("Hardware health assessment (v4)", "Hardware"),
-    ("Hardware integrity assessment (v4)", "Hardware"),
-    ("Battery and power", "Hardware"),
-    ("System integrity and configuration", "Device"),
-    ("Reliability and diagnostics", "Hardware"),
-    ("Crash and panic triage", "Hardware"),
-    ("Parts, repairs and integrity", "Hardware"),
+    ("Device identity (reported by iOS)", "Device identity and configuration"),
+    ("Comparison with previous inspection", "Device identity and configuration"),
+    ("System integrity and configuration", "Device identity and configuration"),
+    ("Diagnostic metric candidates", "Hardware, battery and integrity"),
+    ("Hardware health assessment (v4)", "Hardware, battery and integrity"),
+    ("Hardware integrity assessment (v4)", "Hardware, battery and integrity"),
+    ("Battery and power", "Hardware, battery and integrity"),
+    ("Reliability and diagnostics", "Hardware, battery and integrity"),
+    ("Crash and panic triage", "Hardware, battery and integrity"),
+    ("Parts, repairs and integrity", "Hardware, battery and integrity"),
     ("Automated findings", "Findings"),
     ("Risks, findings and actions", "Findings"),
     ("Collection coverage", "Collection gaps"),
@@ -546,8 +546,9 @@ def _partial_collection_banner(report: dict[str, Any], assessment: dict[str, Any
         "<section class='panel banner-incomplete' role='alert'>"
         "<h2>Incomplete collection — affected areas are inconclusive</h2>"
         f"<ul class='gap-list'>{items}</ul>"
-        "<p class='muted'>Not a device fault until a check ran and returned a negative "
-        "result. Fix the toolchain/permissions and rerun.</p></section>"
+        "<p class='muted'>Environment and permission gaps are not a device fault; only a "
+        "check that ran and returned a negative result is. Fix the toolchain/permissions "
+        "and rerun.</p></section>"
     )
 
 
@@ -930,13 +931,11 @@ def build_html(run_dir: Path, report: dict[str, Any], redact_identifiers: bool =
             "",
         )
     else:
-        verdict_shown = (
-            f"<p class='muted'>no findings recorded from {esc(total_checks if total_checks else NOT_COLLECTED)} "
-            "evaluated checks — not a certification.</p>"
-            if total_checks
-            else f"<p class='muted'>checks: {NOT_COLLECTED}</p>"
+        findings_body = (
+            "<p class='muted'>no findings recorded "
+            f"({esc(total_checks if total_checks else NOT_COLLECTED)} evaluated checks)"
+            " — not a certification.</p>"
         )
-        findings_body = verdict_shown
 
     char_rows = [
         [subsystem, item, value] for subsystem, item, value in metrics
@@ -988,7 +987,7 @@ def build_html(run_dir: Path, report: dict[str, Any], redact_identifiers: bool =
     else:
         done = len(collection)
         gaps_body = (
-            f"<p class='muted'>no collection steps recorded</p>"
+            "<p class='muted'>no collection steps recorded</p>"
             if not done
             else f"<p class='muted'>all {esc(done)} collector steps produced usable evidence "
             "— absence of findings is not certification.</p>"
@@ -1006,7 +1005,7 @@ def build_html(run_dir: Path, report: dict[str, Any], redact_identifiers: bool =
             "No changes detected",
         )
         if comparison_rows
-        else f"<p class='muted'>comparison: not collected</p>"
+        else "<p class='muted'>comparison: not collected</p>"
     )
 
     html_doc = f"""<!doctype html>
@@ -1030,6 +1029,7 @@ h2{{font-size:1.15rem;margin:0 0 10px;letter-spacing:-.01em}}
 .panel{{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}}
 .panel>h2:first-child{{margin-top:0}}
 .muted{{color:var(--muted)}}
+.sr-only{{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}}
 .verdict{{padding:10px 14px;border-radius:9px;font-weight:700;font-size:1.05rem;margin-bottom:8px}}
 .verdict.high{{background:#fce8e8;color:var(--high)}}
 .verdict.warn{{background:#fff3d9;color:var(--warn)}}
