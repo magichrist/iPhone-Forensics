@@ -17,6 +17,6 @@ iphone-audit-*/
 # but older runs and manual invocations can still leave one behind.
 doctor-probe/
 devices-probe/
-
+.venv/
 .freebuff/
 docs/
