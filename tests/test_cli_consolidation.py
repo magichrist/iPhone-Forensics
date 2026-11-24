@@ -497,6 +497,20 @@ def test_yes_sensitive_with_an_explicit_flag_still_grants_the_blanket():
     assert all(getattr(engine, dest) for dest in _BOOLEAN_CONSENT_DESTS)
 
 
+def test_explicit_only_consent_is_recorded_as_granted():
+    """Naming a collector is consent and the run must say so on its face."""
+    from iphone_forensics.cli_v4 import _new_report
+
+    namespace = cli._build_parser().parse_args(["inspect", "--app-list"])
+    sensitive, explicit = cli._resolve_sensitive(namespace)
+    engine = cli._engine_args(
+        namespace, output=".", device="UDID", sensitive=sensitive, explicit=explicit
+    )
+    report = _new_report(engine)
+    assert report["scope"]["sensitive_collection"] == "granted"
+    assert report["scope"]["sensitive_collection_items"] == ["app_list"]
+
+
 def test_consent_never_invents_a_capture_window_or_backup():
     """Ticking a needs-value item must not fill in its argument.
 

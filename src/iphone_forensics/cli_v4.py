@@ -1359,11 +1359,14 @@ def _sensitive_consent_state(args: argparse.Namespace) -> str:
       not_requested - the engine was invoked directly (no consent gate presented)
 
     Declining is never a failure: it simply means those items stay
-    `skipped_by_user` in the collection log.
+    `skipped_by_user` in the collection log. Naming a collector is consent for
+    that collector, so it must not be recorded as a declined request.
     """
     if not hasattr(args, "sensitive_consent"):
         return "not_requested"
-    return "granted" if args.sensitive_consent else "declined"
+    if args.sensitive_consent:
+        return "granted"
+    return "granted" if getattr(args, "sensitive_explicit", None) else "declined"
 
 
 def _triage_crash_artifacts(run_dir: Path, report: dict[str, Any]) -> dict[str, Any]:
