@@ -1,5 +1,7 @@
 import argparse
 
+import pytest
+
 from iphone_forensics.collectors import parse_key_values, parse_plist
 
 
@@ -176,6 +178,55 @@ def test_disk_usage_domain_is_queried_for_storage_capacity(monkeypatch, tmp_path
     assert report["device"].get("TotalDiskCapacity") == "128000000000"
     assert report["device"].get("TotalDataCapacity") == "115484557312"
     assert report["device"].get("ProductType") == "iPhone14,5", "existing keys must survive"
+
+
+@pytest.mark.parametrize("backup", ("libimobiledevice", "pymobiledevice3"))
+def test_requested_backup_refusal_is_recorded_not_fatal(monkeypatch, tmp_path, backup):
+    """An explicitly requested backup must not abort the whole inspection.
+
+    Both backup command shapes are intentionally refused by the read-only
+    allowlist; the collector must record that refusal as a gap and keep running.
+    """
+    from iphone_forensics import collectors
+
+    raw = tmp_path / "evidence"
+    raw.mkdir()
+    monkeypatch.setattr(collectors.shutil, "which", lambda name: f"/usr/bin/{name}")
+    plist = b"<plist><dict><key>ProductType</key><string>iPhone15,4</string></dict></plist>"
+
+    def fake_run(command, timeout=None, **_kw):
+        return {
+            "command": command,
+            "stdout": plist if "-x" in command else b"",
+            "stderr": b"",
+            "returncode": 0,
+            "duration_seconds": 0.0,
+            "timed_out": False,
+        }
+
+    monkeypatch.setattr(collectors, "run_command", fake_run)
+    args = argparse.Namespace(
+        crash_reports=False,
+        app_list=False,
+        provisioning=False,
+        syslog_seconds=0,
+        pmd_syslog_seconds=0,
+        backup=backup,
+        pmd_app_list=False,
+        pmd_processes=False,
+        pmd_crash_reports=False,
+    )
+    report = {"collection": [], "findings": []}
+    collectors.collect_device(args, tmp_path, raw, report, "UDID-1")
+
+    assert any(
+        entry["name"].startswith("full-backup") and entry["status"] == "unsupported"
+        for entry in report["collection"]
+    ), report["collection"]
+    assert any(
+        "backup" in finding["title"].lower() and "refus" in finding["title"].lower()
+        for finding in report["findings"]
+    ), report["findings"]
 
 
 def test_unavailable_diagnostics_relay_is_unsupported_not_an_error(monkeypatch, tmp_path):

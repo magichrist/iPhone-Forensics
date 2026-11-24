@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .readonly import enforce_read_only
+from .readonly import ReadOnlyViolation, enforce_read_only
 from .util import run_command, safe_name, write_command_result
 
 LIB_TOOLS = [
@@ -199,6 +199,43 @@ def save_result(
             meta["status_detail"] = "device or iOS version does not expose this interface"
     collection.append(meta)
     return result
+
+
+def _record_refused_backup(report: dict[str, Any], name: str, tool: str) -> None:
+    """Record a requested backup the read-only guard refused, without aborting the run.
+
+    Both backup shapes are deliberately off the allowlist because they may change
+    device state. A refusal is an evidence gap about the toolchain, not a device
+    fault: the run continues and says what was not collected and why.
+    """
+    report.setdefault("collection", []).append(
+        {
+            "name": name,
+            "command": [],
+            "returncode": None,
+            "duration_seconds": 0,
+            "timed_out": False,
+            "expected_stream_end": False,
+            "stdout_file": "",
+            "stderr_file": "",
+            "stdout_bytes": 0,
+            "stderr_bytes": 0,
+            "status": "unsupported",
+            "status_detail": "refused by the read-only guard (may change device state)",
+        }
+    )
+    report.setdefault("findings", []).append(
+        {
+            "severity": "WARNING",
+            "title": f"Requested full backup refused by the read-only guard ({tool})",
+            "detail": (
+                "This backup command is not on the read-only allowlist because it may "
+                "change device state. No backup was taken; use an authorized backup "
+                "workflow outside this inspection if one is required."
+            ),
+            "evidence": [],
+        }
+    )
 
 
 def _pmd_supports_udid_flag(pmd: str) -> bool:
@@ -612,13 +649,16 @@ def collect_device(args: Any, run_dir: Path, raw: Path, report: dict[str, Any], 
         if tool:
             folder = raw / "libimobiledevice-full-backup"
             folder.mkdir(mode=0o700)
-            save_result(
-                raw,
-                collection,
-                "full-backup-libimobiledevice",
-                [tool, "-u", udid, "backup", str(folder)],
-                3600,
-            )
+            try:
+                save_result(
+                    raw,
+                    collection,
+                    "full-backup-libimobiledevice",
+                    [tool, "-u", udid, "backup", str(folder)],
+                    3600,
+                )
+            except ReadOnlyViolation:
+                _record_refused_backup(report, "full-backup-libimobiledevice", "idevicebackup2")
         else:
             report["findings"].append(
                 {
@@ -672,10 +712,13 @@ def collect_device(args: Any, run_dir: Path, raw: Path, report: dict[str, Any], 
     if args.backup == "pymobiledevice3":
         folder = raw / "pymobiledevice3-full-backup"
         folder.mkdir(mode=0o700)
-        save_result(
-            raw,
-            collection,
-            "full-backup-pymobiledevice3",
-            [*prefix, "backup2", "backup", "--full", str(folder)],
-            3600,
-        )
+        try:
+            save_result(
+                raw,
+                collection,
+                "full-backup-pymobiledevice3",
+                [*prefix, "backup2", "backup", "--full", str(folder)],
+                3600,
+            )
+        except ReadOnlyViolation:
+            _record_refused_backup(report, "full-backup-pymobiledevice3", "pymobiledevice3")
