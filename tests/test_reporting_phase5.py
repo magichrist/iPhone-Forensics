@@ -320,30 +320,37 @@ def test_absent_assessment_counts_are_not_rendered_as_zero(tmp_path: Path):
         }
     )
     html = _html(tmp_path, report)
-    summary = html[html.index("Outcome and completeness") : html.index('<p class="muted">findings')]
-    rows = dict(re.findall(r"<td>(.*?)</td><td>(.*?)</td>", summary, re.DOTALL))
+    summary = html[html.index("1. Summary") : html.index("2. Findings")]
+    # The brief report carries these four facts on one line, not in a second table.
+    values = {
+        label: re.search(rf"{label} ([^·<]+)", summary).group(1).strip()
+        for label in ("collectors completed", "collector gaps", "identity fields")
+    }
     # A ratio is only a ratio when both halves exist. Absent halves render one
     # honest placeholder — never "not provided/not provided" or a hardcoded 0/4.
-    assert rows["collectors completed"] == MISSING
-    assert rows["collector gaps"] == MISSING
-    assert rows["identity fields"] == MISSING
+    assert values["collectors completed"] == MISSING
+    assert values["collector gaps"] == MISSING
+    assert values["identity fields"] == MISSING
     # Regression guard: no field may silently default to a baseline number.
-    for label, value in rows.items():
+    for label, value in values.items():
         assert not re.search(r"(^|/)(0|4)$", value), (
             f"'{label}' still defaults to a number: {value}"
         )
 
 
-def test_missing_collection_telemetry_renders_not_provided(tmp_path: Path):
-    """A collector with no recorded exit code/bytes is unknown, not 0."""
+def test_missing_collection_telemetry_is_not_coerced_to_zero(tmp_path: Path):
+    """A collector with no recorded exit code/bytes stays unknown in the JSON."""
     report = _report(collection=[{"name": "mystery-collector", "status": "failed_or_partial"}])
     html = _html(tmp_path, report)
-    # Anchor inside the gaps table, not the banner (which also names the collector).
+    # The brief HTML shows only what matters: the step, its status and the outcome.
     gaps_start = html.index("5. Collection gaps")
     row_start = html.index("mystery-collector", gaps_start)
     row = html[row_start : html.index("</tr>", row_start)]
-    assert MISSING in row
+    assert "failed_or_partial" in row and "Failed or partial" in row
     assert "<td>0</td>" not in row
+    # The unmeasured telemetry is still absent, never inventoried as a zero.
+    assert report["collection"][0].get("returncode") is None
+    assert report["collection"][0].get("duration_seconds") is None
 
 
 def test_crash_triage_absence_is_never_rendered_as_a_zero(tmp_path: Path):

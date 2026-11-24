@@ -249,11 +249,14 @@ def test_unknown_status_never_counts_as_passed(tmp_path: Path):
 
 
 def test_dashboard_shows_measured_metrics_only_when_present(tmp_path: Path):
-    """Battery/storage numbers appear when measured and vanish when they are not."""
+    """Only measurements needing review are rendered; passing numbers stay in JSON."""
     report = _copy(FULL_REPORT)
     html = _render(tmp_path, report)
-    assert "612" in html and "cycles" in html, "a genuinely measured metric must be shown"
-    assert "128" in html and "decimal GB" in html
+    assert "612" in html and "cycles" in html, "a genuinely measured non-pass must be shown"
+    # A passing check's number is not repeated in the brief HTML; the evidence of
+    # record still holds it. Raw device capacity is rendered once as derived GB.
+    assert report["hardware_assessment"]["checks"][2]["measurement"] == 128.0
+    assert "128 decimal GB" not in html
 
     stripped = _copy(
         {

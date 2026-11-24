@@ -12,12 +12,10 @@ from .util import redact, write_json
 # "unknown" and "zero" mean opposite things in a forensic report (spec §12 / report-schema.md).
 MISSING = "not provided"
 
-# v5 §4C report outline: exactly these 11 sections, in this order. The v4 report
-# v5.2 brief-report outline rendered by build_html: five sections, in this order.
-# The historical outline (SECTION_TITLES below) is retained as documentation of what
-# the v4/v5 verbose report carried; the HTML now renders only what a professional
-# reader scans: findings, device facts, hardware numbers, and this run's gaps. All
-# prose, charts, capability matrices and repeated disclaimers are gone.
+# Compact report outline rendered by build_html: five sections, in this order.
+# The HTML carries only what a reader needs to act: the verdict, findings, device
+# facts, hardware checks needing review, and this run's gaps. Charts, capability
+# matrices, duplicate tables and repeated disclaimers are deliberately gone.
 SECTION_TITLES: tuple[str, ...] = (
     "Summary",
     "Findings",
@@ -102,19 +100,8 @@ _COLLECTION_STATUS_BUCKET: dict[str, str] = {
     "failed_or_partial": "skipped",
 }
 
-# Severity order for "top issues" and the severity chart (most severe first).
+# Severity order for the findings table (most severe first).
 _SEVERITY_RANK: dict[str, int] = {"BLOCKER": 0, "WARNING": 1, "REVIEW": 2, "INFO": 3}
-
-# Series colours. Fixed and self-contained — no theme, font, or CDN dependency.
-_BUCKET_COLOR: dict[str, str] = {
-    "passed": "#176b43",
-    "warning": "#8b5a00",
-    "failed": "#9c2525",
-    "inconclusive": "#5e6a78",
-    "unsupported": "#6b4f9c",
-    "skipped": "#9aa5b1",
-}
-
 
 def esc(value: Any) -> str:
     return html.escape(str(value if value is not None else ""), quote=True)
@@ -144,6 +131,11 @@ def _ratio(numerator: Any, denominator: Any, missing: str = MISSING) -> str:
     return f"{num}/{den}"
 
 
+def _records(value: Any) -> tuple[Any, ...]:
+    """A malformed report must never make rendering crash on a scalar list field."""
+    return tuple(value) if isinstance(value, (list, tuple)) else ()
+
+
 def _bucket_of(status: Any, mapping: dict[str, str]) -> str:
     """Map any status string onto a dashboard bucket; unknown never becomes 'passed'."""
     try:
@@ -157,31 +149,32 @@ def _bucket_of(status: Any, mapping: dict[str, str]) -> str:
 # The distinction the report must never blur: a *negative result* is a finding
 # about the device; every other gap is an absence of evidence about it.
 _GAP_OUTCOME: dict[str, str] = {
-    "failed": "Check ran and returned a negative result — a real finding.",
-    "inconclusive": "Evidence collected but insufficient to decide.",
-    "unsupported": "This device/iOS/toolchain cannot answer this question.",
-    "permission_denied": "Blocked by pairing or permissions — re-trust and retry.",
-    "tool_missing": "Tool not installed — install it, nothing learned about the device.",
-    "collection_error": "Command failed or timed out — inspect its stderr.",
-    "skipped_by_user": "Not collected — sensitive collection was not consented to.",
-    "not_applicable": "Does not apply to this device.",
+    "failed": "Negative result — real finding",
+    # v4/v3 alias: a failed *or partial* step is not necessarily a negative result.
+    "failed_or_partial": "Failed or partial — see report.json",
+    "inconclusive": "Evidence insufficient",
+    "unsupported": "Tool/iOS cannot answer",
+    "permission_denied": "Re-trust the device, then retry",
+    "tool_missing": "Tool not installed",
+    "collection_error": "Command failed or timed out",
+    "skipped_by_user": "Not consented",
+    "not_applicable": "Not applicable",
 }
 
 
 def _gap_outcome(status: Any) -> str:
-    """Human explanation for a non-passing collector status."""
+    """Short explanation for a non-passing collector status (full text in report.json)."""
     try:
         return _GAP_OUTCOME.get(
             str(status if status is not None else "").strip().lower(),
-            "No usable evidence collected for this step.",
+            "No usable evidence",
         )
     except (TypeError, ValueError):  # pragma: no cover - defensive
-        return "No usable evidence collected for this step."
+        return "No usable evidence"
 
 
-# Human wording for each epistemic label. Paired with `_EPISTEMIC_PILL`, which
-# carries the colour for the same labels. The text is the signal; the colour is only
-# reinforcement, because colour alone is not an accessible cue (WCAG 1.4.1).
+# Human wording for each epistemic label. The text is the signal; the pill colour is
+# only reinforcement, because colour alone is not an accessible cue (WCAG 1.4.1).
 _EPISTEMIC_TEXT: dict[str, str] = {
     "observed": "Verified — read from collected evidence",
     "inferred": "Inferred — reasoned from evidence",
@@ -277,7 +270,7 @@ def dashboard_counts(report: dict[str, Any]) -> dict[str, int]:
 
     hardware = report.get("hardware_assessment") if isinstance(report, dict) else None
     if isinstance(hardware, dict):
-        for check in hardware.get("checks") or []:
+        for check in _records(hardware.get("checks")):
             if isinstance(check, dict):
                 counts[_bucket_of(check.get("status"), _HARDWARE_STATUS_BUCKET)] += 1
 
@@ -306,56 +299,6 @@ def _severity_counts(report: dict[str, Any]) -> dict[str, int]:
     return counts
 
 
-def _measured_metrics(report: dict[str, Any]) -> list[tuple[str, str, str]]:
-    """Every hardware check that carries an actual numeric measurement.
-
-    Any absent measurement stays out of the table entirely and renders as one honest
-    "not collected" line — never as 0%, 100%, or a plausible-looking placeholder.
-    """
-    hardware = report.get("hardware_assessment") or {}
-    if not isinstance(hardware, dict):
-        return []
-
-    metrics: list[tuple[str, str, str]] = []
-    for check in hardware.get("checks", []) or []:
-        if not isinstance(check, dict):
-            continue
-        measurement = check.get("measurement")
-        if not isinstance(measurement, (int, float)) or isinstance(measurement, bool):
-            continue
-        unit = str(check.get("measurement_unit") or "").strip()
-        value = f"{measurement:g}" if isinstance(measurement, float) else str(measurement)
-        subsystem = str(check.get("subsystem") or "").strip()
-        item = str(check.get("question") or subsystem or "measurement")
-        metrics.append((subsystem, item, f"{value}{' ' + unit if unit else ''}"))
-    return metrics
-
-
-def _device_facts(
-    report: dict[str, Any], redact_identifiers: bool = False
-) -> list[tuple[str, str]]:
-    """Device model + iOS/build + inspection time, each honestly missing when absent."""
-    device = report.get("device") if isinstance(report.get("device"), dict) else {}
-    rows: list[tuple[str, str]] = [
-        ("Device model", _val(device.get("ProductType"))),
-        ("Model number", _val(device.get("ModelNumber"))),
-        ("Hardware model", _val(device.get("HardwareModel"))),
-        ("iOS version", _val(device.get("ProductVersion"))),
-        ("iOS build", _val(device.get("BuildVersion"))),
-        ("Inspection started (UTC)", _val(report.get("started_at"))),
-        ("Inspection finished (UTC)", _val(report.get("finished_at"))),
-    ]
-    if redact_identifiers:
-        for label, key in (
-            ("Serial number", "SerialNumber"),
-            ("IMEI", "InternationalMobileEquipmentIdentity"),
-        ):
-            rows.append(
-                (label, _redact_identifier(device.get(key)) if device.get(key) else NOT_COLLECTED)
-            )
-    return [(label, str(value)) for label, value in rows]
-
-
 def create_manifest(run_dir: Path) -> dict[str, Any]:
     """Write `manifest.json` for *run_dir*.
 
@@ -381,7 +324,7 @@ class _Html(str):
     """A string that is already trusted markup and must not be escaped again.
 
     Tables escape every cell, which is correct for data but destroyed the
-    epistemic pills and the consent cells: readers saw
+    epistemic pills and the machine-verifiable count badges: readers saw
     `&lt;span class='pill...&gt;` as literal text. Escaping stays the default; a
     cell must *opt in* to being pre-rendered, so a device-supplied string can
     never reach the document unescaped by accident.
@@ -518,12 +461,15 @@ def _report_secrets(report: dict[str, Any]) -> tuple[str, ...]:
 
 
 def _partial_collection_banner(report: dict[str, Any], assessment: dict[str, Any]) -> str:
-    """Terse alert when collection was incomplete: a partial run must never read healthy.
+    """One-line alert when collection was incomplete; a partial run never reads healthy.
 
-    Names the non-completing collector steps verbatim; the Environment/permission
-    distinction ("not a device fault") is carried by the gaps table, not by prose here.
+    The failing steps are named here and explained once in section 5. Environment and
+    permission gaps are not a device fault; that distinction takes a few words, not a
+    second list of the same collectors.
     """
-    collection = [c for c in report.get("collection", []) if isinstance(c, dict)]
+    collection = [
+        c for c in (report.get("collection") or []) if isinstance(c, dict)
+    ] if isinstance(report.get("collection"), (list, tuple)) else []
     failed = [
         c
         for c in collection
@@ -533,22 +479,13 @@ def _partial_collection_banner(report: dict[str, Any], assessment: dict[str, Any
     if not failed and not incomplete_status:
         return ""
 
-    lines = [
-        f"{c.get('name') or 'unnamed'}: {c.get('status') or 'unknown status'}"
-        for c in failed
-    ]
-    if incomplete_status:
-        lines.append("assessment status: incomplete")
-    if not collection:
-        lines.append("no collection steps recorded")
-    items = "".join(f"<li>{esc(line)}</li>" for line in lines)
+    names = ", ".join(str(c.get("name") or "unnamed") for c in failed)
+    if not names:
+        names = "no collection steps recorded" if not collection else "incomplete assessment"
     return (
         "<section class='panel banner-incomplete' role='alert'>"
-        "<h2>Incomplete collection — affected areas are inconclusive</h2>"
-        f"<ul class='gap-list'>{items}</ul>"
-        "<p class='muted'>Environment and permission gaps are not a device fault; only a "
-        "check that ran and returned a negative result is. Fix the toolchain/permissions "
-        "and rerun.</p></section>"
+        f"<b>Incomplete collection</b> — {esc(names)}. Affected areas are inconclusive; "
+        "environment gaps are not a device fault.</section>"
     )
 
 
@@ -709,63 +646,57 @@ def validate_report_html(html_text: str, report: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _outcome_counts_table(report: dict[str, Any]) -> str:
-    """The one table that summarizes how much was evaluated, and how it came out.
+def _outcome_counts_line(report: dict[str, Any]) -> str:
+    """One line of verified counts instead of an eight-row summary table.
 
-    Every count is recomputed here and carries its value in a `data-dash-*`
-    attribute so `validate_report_html` can re-derive the same numbers from
-    report.json at validation time. A run that evaluated nothing displays
-    "not collected" instead of a row of zeroes — a zero would read as a result.
+    Every count carries its value in a `data-dash-*` attribute so
+    `validate_report_html` can re-derive it from report.json. A run that evaluated
+    nothing displays "not collected" rather than a row of zeroes.
     """
     counts = dashboard_counts(report)
     performed = counts["checks_performed"]
-    rows: list[list[Any]] = [[
-        "checks performed",
-        _Html(f"<b data-dash-key='checks_performed' data-dash-count='{esc(performed)}'>"
-              f"{esc(performed if performed else NOT_COLLECTED)}</b>"),
-    ]]
-    for name in OUTCOME_BUCKETS:
-        shown = counts[name] if performed else NOT_COLLECTED
-        rows.append([
-            name,
-            _Html(f"<b data-dash-key='{esc(name)}' data-dash-count='{esc(counts[name])}'>"
-                  f"{esc(shown)}</b>"),
-        ])
-    return _table(["Outcome", "Checks and collector steps"], rows, "")
+    parts = [
+        f"{name} <b data-dash-key='{esc(name)}' data-dash-count='{esc(counts[name])}'>"
+        f"{esc(counts[name] if performed else NOT_COLLECTED)}</b>"
+        for name in OUTCOME_BUCKETS
+    ]
+    return (
+        "<p class='muted'>"
+        f"<b data-dash-key='checks_performed' data-dash-count='{esc(performed)}'>"
+        f"{esc(performed if performed else NOT_COLLECTED)}</b> evaluated: "
+        + " · ".join(parts)
+        + "</p>"
+    )
 
 
 def build_html(run_dir: Path, report: dict[str, Any], redact_identifiers: bool = False) -> None:
-    """Render the brief HTML report (v5.2 presentation, v5.0.0 JSON unchanged).
+    """Render the compact report: one fact per line, one table per list.
 
-    The reader is assumed to be a professional who knows what a cycle count, a
-    provisioning profile or a panic string is. The report is therefore a dense
-    table-first document: the verdict, the count summary, every non-INFO finding,
-    the raw identity/configuration facts, the measured hardware numbers with their
-    non-pass checks and integrity assessment, and the collector gaps of this run.
-    Explanatory prose, per-section disclaimers, charts and project-level capability
-    tables are gone; report.json remains the complete record.
+    report.json stays the complete evidence record. The HTML carries only the
+    verdict, the findings needing action, the identity facts worth a buyer's time,
+    the non-passing measurements and this run's gaps. Nothing that reads the same
+    on every run is repeated here.
     """
-    device = report.get("device", {}) if isinstance(report.get("device"), dict) else {}
-    identity_fields = [
-        "DeviceName",
-        "ProductType",
-        "ProductVersion",
-        "BuildVersion",
-        "ModelNumber",
-        "HardwareModel",
-        "SerialNumber",
-        "InternationalMobileEquipmentIdentity",
-        "BoardId",
-        "UniqueDeviceID",
-        "UDID",
-        "ActivationState",
-        "CarrierBundleVersion",
-        "BasebandVersion",
-        "DeviceColor",
-        "TimeZone",
-        "TotalDiskCapacity",
-        "TotalDataCapacity",
-    ]
+    device = report.get("device") if isinstance(report.get("device"), dict) else {}
+    assessment = report.get("assessment") if isinstance(report.get("assessment"), dict) else {}
+    raw_collection = report.get("collection")
+    collection = (
+        [c for c in raw_collection if isinstance(c, dict)]
+        if isinstance(raw_collection, (list, tuple))
+        else []
+    )
+    raw_hardware = report.get("hardware_assessment")
+    hardware = raw_hardware if isinstance(raw_hardware, dict) else {}
+    raw_integrity = report.get("integrity_assessment")
+    integrity = raw_integrity if isinstance(raw_integrity, dict) else {}
+    raw_findings = report.get("findings")
+    findings = (
+        [f for f in raw_findings if isinstance(f, dict)]
+        if isinstance(raw_findings, (list, tuple))
+        else []
+    )
+
+    # --- identity: raw bytes are deliberately dropped next to their derived GB ---
     sensitive_keys = {
         "SerialNumber",
         "InternationalMobileEquipmentIdentity",
@@ -774,29 +705,42 @@ def build_html(run_dir: Path, report: dict[str, Any], redact_identifiers: bool =
         "WiFiAddress",
         "BluetoothAddress",
     }
-    identity_rows = [
-        [
-            key,
-            _redact_identifier(device.get(key))
-            if redact_identifiers and key in sensitive_keys
-            else device.get(key),
-        ]
-        for key in identity_fields
-        if device.get(key) is not None
-    ]
-    for capacity_key in ("TotalDiskCapacity", "TotalDataCapacity"):
-        value = device.get(capacity_key)
+    identity_rows: list[list[Any]] = []
+    for key in (
+        "DeviceName",
+        "ProductType",
+        "ProductVersion",
+        "BuildVersion",
+        "ModelNumber",
+        "HardwareModel",
+        "SerialNumber",
+        "InternationalMobileEquipmentIdentity",
+        "UniqueDeviceID",
+        "UDID",
+        "ActivationState",
+    ):
+        value = device.get(key)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        identity_rows.append(
+            [
+                key,
+                _redact_identifier(value)
+                if redact_identifiers and key in sensitive_keys
+                else value,
+            ]
+        )
+    for key, label in (
+        ("TotalDiskCapacity", "Total disk capacity (decimal GB)"),
+        ("TotalDataCapacity", "Usable data capacity (decimal GB)"),
+    ):
         try:
-            capacity_bytes = int(value)
-            identity_rows.append(
-                [f"{capacity_key} (decimal GB, derived)", f"{capacity_bytes / 1_000_000_000:.2f} GB"]
-            )
-        except (TypeError, ValueError):
+            identity_rows.append([label, f"{int(device[key]) / 1_000_000_000:.2f} GB"])
+        except (KeyError, TypeError, ValueError, OverflowError):
             pass
 
-    # Read-only provenance signals, raw values only.
     provenance = report.get("provenance")
-    if isinstance(provenance, dict) and provenance:
+    if isinstance(provenance, dict):
         for key, label in (
             ("activation_state", "Activation state (host query)"),
             ("mounted_images", "DeveloperDiskImage mounted"),
@@ -807,92 +751,101 @@ def build_html(run_dir: Path, report: dict[str, Any], redact_identifiers: bool =
             if isinstance(entry, dict) and entry.get("value"):
                 identity_rows.append([label, entry["value"]])
 
-    if report.get("comparison"):
+    comparison = report.get("comparison")
+    comparison_rows: list[list[Any]] = []
+    if isinstance(comparison, dict):
         comparison_rows = [
-            [item.get("field"), item.get("previous"), item.get("current"), item.get("status")]
-            for item in report["comparison"].get("changes", [])
+            [
+                item.get("field"),
+                item.get("previous"),
+                item.get("current"),
+                item.get("status"),
+            ]
+            for item in _records(comparison.get("changes"))
+            if isinstance(item, dict)
         ]
-    else:
-        comparison_rows = []
 
-    findings = [
-        f for f in report.get("findings", []) or [] if isinstance(f, dict)
-    ]
+    # --- findings: INFO stays in report.json, everything else is actionable ---
     brief_findings = [
         f for f in findings if str(f.get("severity", "")).strip().upper() != "INFO"
     ]
     info_count = len(findings) - len(brief_findings)
-    finding_rows = [
+    ordered_findings = sorted(
+        brief_findings,
+        key=lambda f: _SEVERITY_RANK.get(str(f.get("severity", "")).strip().upper(), 99),
+    )
+
+    def evidence_names(finding: dict[str, Any]) -> str:
+        paths = [str(path) for path in _records(finding.get("evidence")) if path]
+        if not paths:
+            return "—"
+        names = [Path(path).name for path in paths[:2]]
+        return ", ".join(names) + (f" +{len(paths) - 2}" if len(paths) > 2 else "")
+
+    finding_rows: list[list[Any]] = [
         [
-            f.get("severity", "INFO"),
-            f.get("title", ""),
-            _epistemic_badge(f),
-            f.get("detail", ""),
-            ", ".join(str(path) for path in (f.get("evidence") or [])),
+            str(f.get("severity", "INFO")).upper(),
+            _Html(f"{esc(f.get('title') or '')} {_epistemic_badge(f)}"),
+            f.get("detail") or "—",
+            evidence_names(f),
         ]
-        for f in brief_findings
+        for f in ordered_findings
     ]
 
-    severity = _severity_counts(report)
-    non_pass_checks = []
-    metrics = _measured_metrics(report)
-    hardware = report.get("hardware_assessment") if isinstance(report.get("hardware_assessment"), dict) else {}
-    for check in hardware.get("checks", []) or []:
-        if isinstance(check, dict) and _bucket_of(check.get("status"), _HARDWARE_STATUS_BUCKET) != "passed":
-            unit = str(check.get("measurement_unit") or "").strip()
-            raw = check.get("measurement")
-            value = MISSING if raw is None else (
-                f"{raw:g}{' ' + unit if unit else ''}" if isinstance(raw, (int, float))
-                else str(raw)
-            )
-            non_pass_checks.append(
-                [
-                    check.get("subsystem", ""),
-                    check.get("question", ""),
-                    check.get("status", ""),
-                    value,
-                    check.get("confidence", ""),
-                ]
-            )
-
-    integrity = report.get("integrity_assessment") if isinstance(report.get("integrity_assessment"), dict) else {}
-    integrity_data = bool(
-        integrity.get("classifications") or integrity.get("changes") or integrity.get("overall")
-    )
-    if integrity_data:
-        class_rows = [
-            [field_name, status]
-            for field_name, status in (integrity.get("classifications") or {}).items()
-        ]
-        change_rows = [
+    # --- hardware: only checks that are not passes, each number shown once ---
+    non_pass_rows: list[list[Any]] = []
+    for check in _records(hardware.get("checks")):
+        if not isinstance(check, dict):
+            continue
+        if _bucket_of(check.get("status"), _HARDWARE_STATUS_BUCKET) == "passed":
+            continue
+        raw = check.get("measurement")
+        unit = str(check.get("measurement_unit") or "").strip()
+        if raw is None:
+            value: Any = MISSING
+        elif isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            value = f"{raw:g}{' ' + unit if unit else ''}"
+        else:
+            value = str(raw)
+        non_pass_rows.append(
             [
-                ch.get("field", ""),
-                ch.get("previous", ""),
-                ch.get("current", ""),
-                ch.get("classification", ch.get("status", "")),
+                check.get("question") or check.get("subsystem") or "check",
+                check.get("status") or "unknown",
+                value,
             ]
-            for ch in integrity.get("changes", [])
-        ]
-    else:
-        class_rows = change_rows = []
+        )
 
-    collection = [c for c in report.get("collection", []) if isinstance(c, dict)]
+    integrity_bits: list[str] = []
+    if integrity.get("overall"):
+        integrity_bits.append(f"integrity: {integrity['overall']}")
+    classifications = integrity.get("classifications")
+    if isinstance(classifications, dict):
+        for field, status in classifications.items():
+            if str(status).strip().lower() not in {"consistent", "verified"}:
+                integrity_bits.append(f"{field}: {status}")
+    for change in _records(integrity.get("changes")):
+        if not isinstance(change, dict):
+            continue
+        integrity_bits.append(
+            f"{change.get('field')}: {change.get('previous')} → {change.get('current')} "
+            f"({change.get('classification') or change.get('status') or 'unknown'})"
+        )
+
+    hardware_parts: list[str] = []
+    if non_pass_rows:
+        hardware_parts.append(_table(["Check", "Status", "Value"], non_pass_rows, ""))
+    if integrity_bits:
+        hardware_parts.append(f"<p class='muted'>{esc(' · '.join(integrity_bits))}</p>")
+    if not hardware_parts:
+        hardware_parts.append(f"<p class='muted'>hardware and battery: {esc(NOT_COLLECTED)}.</p>")
+
     gap_rows = [
-        [
-            c.get("name", ""),
-            c.get("status", ""),
-            _gap_outcome(c.get("status")),
-            _val(c.get("returncode")),
-            _val(c.get("duration_seconds")),
-        ]
+        [c.get("name") or "unnamed", c.get("status") or "unknown", _gap_outcome(c.get("status"))]
         for c in collection
         if _bucket_of(c.get("status"), _COLLECTION_STATUS_BUCKET) not in {"passed", "warning"}
     ]
 
-    assessment = report.get("assessment", {}) if isinstance(report.get("assessment"), dict) else {}
     incomplete_banner = _partial_collection_banner(report, assessment)
-    counts = dashboard_counts(report)
-    total_checks = counts["checks_performed"]
     severity_class = (
         "high"
         if assessment.get("status") == "high_risk"
@@ -904,170 +857,94 @@ def build_html(run_dir: Path, report: dict[str, Any], redact_identifiers: bool =
     if incomplete_banner and severity_class == "neutral":
         severity_class = "warn"
 
-    # --- section construction ------------------------------------------------
-    summary_rows = [
-        ["assessment status", _val(assessment.get("status"))],
-        [
-            "collectors completed",
-            _ratio(assessment.get("collection_successful"), assessment.get("collection_total")),
-        ],
-        ["collector gaps", _val(assessment.get("collection_failed_or_partial"))],
-        [
-            "identity fields",
-            _ratio(
-                assessment.get("identity_fields_present"),
-                assessment.get("identity_fields_expected"),
-            ),
-        ],
-    ]
-    severity_summary = " · ".join(
-        f"{name} {severity.get(name, 0)}" for name in ("BLOCKER", "WARNING", "REVIEW", "INFO")
+    counts_line = _outcome_counts_line(report)
+    completeness_line = " · ".join(
+        (
+            f"collectors completed {_ratio(assessment.get('collection_successful'), assessment.get('collection_total'))}",
+            f"collector gaps {_val(assessment.get('collection_failed_or_partial'))}",
+            f"identity fields {_ratio(assessment.get('identity_fields_present'), assessment.get('identity_fields_expected'))}",
+            f"INFO findings: {info_count}",
+        )
     )
-
-    if brief_findings:
-        findings_body = _table(
-            ["Severity", "Finding", "How established", "Detail", "Evidence"],
-            finding_rows,
-            "",
-        )
-    else:
-        findings_body = (
-            "<p class='muted'>no findings recorded "
-            f"({esc(total_checks if total_checks else NOT_COLLECTED)} evaluated checks)"
-            " — not a certification.</p>"
-        )
-
-    char_rows = [
-        [subsystem, item, value] for subsystem, item, value in metrics
-    ]
-    hardware_parts: list[str] = []
-    if char_rows:
-        hardware_parts.append(
-            _table(["Subsystem", "Item", "Measured value"], char_rows, "")
-        )
-    if non_pass_checks:
-        hardware_parts.append(
-            _table(
-                ["Subsystem", "Item", "Status", "Value", "Confidence"],
-                non_pass_checks,
-                "",
-            )
-        )
-    if hardware_parts:
-        hardware_parts.append(
-            f"<p class='muted'>Battery/storage: "
-            f"<b>{esc('measured above' if char_rows else NOT_COLLECTED)}</b>."
-            + (" Cycle counts are tool-reported candidates." if char_rows else "")
-            + "</p>"
-        )
-    elif not integrity_data:
-        hardware_parts.append(f"<p class='muted'>hardware and battery: {esc(NOT_COLLECTED)}.</p>")
-    if integrity_data:
-        hardware_parts.append(
-            "<p class='muted'>integrity: "
-            "<b>" + esc(integrity.get("overall", "inconclusive")) + "</b></p>"
-            + _table(
-                ["Field", "Classification"],
-                class_rows,
-                "No classifications",
-            )
-            + _table(
-                ["Changed field", "Previous", "Current", "Classification"],
-                change_rows,
-                "No changes between snapshots",
-            )
-        )
-
-    if gap_rows:
-        gaps_body = _table(
-            ["Collector", "Status", "Outcome", "Exit code", "Seconds"],
-            gap_rows,
-            "",
-        )
-    else:
-        done = len(collection)
-        gaps_body = (
-            "<p class='muted'>no collection steps recorded</p>"
-            if not done
-            else f"<p class='muted'>all {esc(done)} collector steps produced usable evidence "
-            "— absence of findings is not certification.</p>"
-        )
-
+    verdict = esc(assessment.get("verdict") or "INCOMPLETE — NO ASSESSMENT")
+    findings_body = (
+        _table(["Severity", "Finding", "Detail", "Evidence"], finding_rows, "")
+        if finding_rows
+        else "<p class='muted'>no findings recorded — not a certification.</p>"
+    )
+    identity_body = _table(
+        ["Field", "Reported value"], identity_rows, f"device identity: {NOT_COLLECTED}"
+    )
     redaction_note = (
-        "  <p class='muted'>Identifiers masked in this HTML export; report.json keeps the values.</p>"
+        "<p class='muted'>Identifiers masked in this HTML export; report.json keeps the values.</p>"
         if redact_identifiers
         else ""
     )
     comparison_block = (
-        _table(
+        "<h3>Change since the previous inspection</h3>"
+        + _table(
             ["Field", "Previous", "Current", "Assessment"],
             comparison_rows,
-            "No changes detected",
+            "",
         )
         if comparison_rows
-        else "<p class='muted'>comparison: not collected</p>"
+        else ""
+    )
+    gaps_body = (
+        _table(["Collector", "Status", "Outcome"], gap_rows, "")
+        if gap_rows
+        else (
+            "<p class='muted'>no collection steps recorded</p>"
+            if not collection
+            else f"<p class='muted'>all {esc(len(collection))} collector steps produced usable evidence "
+            "— absence of findings is not certification.</p>"
+        )
+    )
+    headline = (
+        f"{esc(_val(device.get('ProductType'), 'device not identified'))} · "
+        f"iOS {esc(_val(device.get('ProductVersion'), NOT_COLLECTED))} · "
+        f"{esc(report.get('started_at'))}"
     )
 
     html_doc = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>iPhone Inspection — {esc(assessment.get("verdict", "INCOMPLETE"))}</title>
+<title>iPhone Inspection — {esc(assessment.get('verdict', 'INCOMPLETE'))}</title>
 <style>
-:root{{
-  --bg:#eef1f6;--panel:#fff;--ink:#131b26;--muted:#5b6674;--line:#d7dee6;--accent:#1f4f9c;
-  --accent-soft:#e8f0fb;--high:#8f2020;--warn:#7d5100;--good:#14603a;
-}}
-@media (prefers-color-scheme:dark){{:root{{
-  --bg:#0e1319;--panel:#161d26;--ink:#e6ecf3;--muted:#9aa7b6;--line:#2a3542;--accent:#7fb0f5;
-  --accent-soft:#17263a;--high:#f08a8a;--warn:#e0b25e;--good:#6cd39a;}}}}
-@media (prefers-reduced-motion:reduce){{*{{animation-duration:.01ms !important;transition-duration:.01ms !important;scroll-behavior:auto !important}}}}
+:root{{--bg:#eef1f6;--panel:#fff;--ink:#131b26;--muted:#5b6674;--line:#d7dee6;--accent:#1f4f9c;--good:#14603a;--high:#8f2020;--warn:#7d5100}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#0e1319;--panel:#161d26;--ink:#e6ecf3;--muted:#9aa7b6;--line:#2a3542;--accent:#7fb0f5;--good:#6cd39a;--high:#f08a8a;--warn:#e0b25e}}}}
+@media (prefers-reduced-motion:reduce){{*{{transition:none!important}}}}
 *{{box-sizing:border-box}}
-body{{margin:0;background:var(--bg);color:var(--ink);
-  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}}
-main{{max-width:960px;margin:0 auto;padding:24px 18px 48px}}
-h1{{font-size:1.6rem;margin:.2em 0 .3em;letter-spacing:-.02em}}
-h2{{font-size:1.15rem;margin:0 0 10px;letter-spacing:-.01em}}
-.panel{{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}}
-.panel>h2:first-child{{margin-top:0}}
+body{{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}}
+main{{max-width:860px;margin:0 auto;padding:18px 14px 32px}}
+h1{{font-size:1.2rem;margin:0 0 3px}} h2{{font-size:1rem;margin:0 0 8px}} h3{{font-size:.9rem;margin:12px 0 6px}}
+p{{margin:6px 0}}
+.panel{{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:10px 0}}
 .muted{{color:var(--muted)}}
 .sr-only{{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}}
-.verdict{{padding:10px 14px;border-radius:9px;font-weight:700;font-size:1.05rem;margin-bottom:8px}}
-.verdict.high{{background:#fce8e8;color:var(--high)}}
-.verdict.warn{{background:#fff3d9;color:var(--warn)}}
-.verdict.neutral{{background:#e8f5ee;color:var(--good)}}
+.verdict{{display:inline-block;padding:6px 10px;border-radius:7px;font-weight:700;margin-bottom:4px}}
+.verdict.high{{background:#fce8e8;color:var(--high)}} .verdict.warn{{background:#fff3d9;color:var(--warn)}} .verdict.neutral{{background:#e8f5ee;color:var(--good)}}
 @media (prefers-color-scheme:dark){{.verdict.high{{background:#3a1c1c}}.verdict.warn{{background:#382c14}}.verdict.neutral{{background:#16301f}}}}
-.banner-incomplete{{border:2px solid var(--high);background:#fdeaea}}
-.banner-incomplete h2{{color:var(--high)}}
-.gap-list{{margin:6px 0;padding-left:20px}}
-.banner-incomplete li{{margin:3px 0}}
+.banner-incomplete{{border:2px solid var(--high)}}
+.pill{{font-size:.8em;white-space:nowrap}}
 .table-wrap{{width:100%;overflow-x:auto}}
-table{{width:100%;border-collapse:collapse;font-size:.9rem}}
-th,td{{text-align:left;vertical-align:top;padding:7px 10px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}}
-th{{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}}
+table{{width:100%;border-collapse:collapse;font-size:.85rem}}
+th,td{{text-align:left;vertical-align:top;padding:6px 8px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}}
+th{{font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}}
 tbody tr:last-child td{{border-bottom:none}}
-footer{{margin-top:24px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:.85rem}}
-@media print{{
-  :root{{--bg:#fff;--panel:#fff;--ink:#000;--muted:#333;--line:#bbb}}
-  body{{background:#fff;font-size:10pt}}
-  main{{max-width:none;padding:0}}
-  .panel{{border:1px solid #ccc;padding:10px;margin:8px 0;break-inside:avoid}}
-  th{{background:#eee;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-}}
+footer{{margin-top:18px;padding-top:8px;border-top:1px solid var(--line);color:var(--muted);font-size:.8rem}}
+@media print{{:root{{--bg:#fff;--panel:#fff;--ink:#000;--muted:#333;--line:#bbb}} body{{background:#fff;font-size:10pt}} main{{max-width:none;padding:0}} .panel{{padding:8px;margin:6px 0;break-inside:avoid}} th{{background:#eee}}}}
 </style></head><body><main>
-<header><h1>iPhone Inspection</h1><p class="muted">Started {esc(report.get("started_at"))} · Finished {esc(report.get("finished_at"))}</p></header>
+<header><h1>iPhone Inspection</h1><p class="muted">{headline}</p></header>
 {incomplete_banner}
 <section class="panel hero"><h2>1. Summary</h2>
-<div class="verdict {severity_class}">{esc(assessment.get("verdict", "INCOMPLETE — NO ASSESSMENT"))}</div>
-{_outcome_counts_table(report)}
-<h3>Outcome and completeness</h3>{_table(["Field", "Value"], summary_rows, "No assessment recorded.")}
-<p class="muted">findings: {esc(severity_summary)}</p></section>
-<section class="panel"><h2>2. Findings</h2>{findings_body}{f"<p class='muted'>INFO findings: {info_count} — details in report.json.</p>" if info_count else ""}</section>
-<section class="panel"><h2>3. Device identity and configuration</h2>{_table(["Field", "Reported value"], identity_rows, f"device identity: {NOT_COLLECTED}")}{redaction_note}
-<h3>Change since the previous inspection</h3>{comparison_block}</section>
-<section class="panel"><h2>4. Hardware, battery and integrity</h2>{"".join(hardware_parts)}</section>
+<div class="verdict {severity_class}">{verdict}</div>
+{counts_line}
+<p class="muted">{esc(completeness_line)}</p></section>
+<section class="panel"><h2>2. Findings</h2>{findings_body}</section>
+<section class="panel"><h2>3. Device identity and configuration</h2>{identity_body}{redaction_note}{comparison_block}</section>
+<section class="panel"><h2>4. Hardware, battery and integrity</h2>{''.join(hardware_parts)}</section>
 <section class="panel"><h2>5. Collection gaps</h2>{gaps_body}</section>
-<footer>iPhone Forensics v{esc(report.get("version"))} · Generated locally · report.json is the evidence of record.
-Labels: Verified = read from evidence · Inferred = reasoned · Unknown = open question · Manual check required = a person must look.
-Not collected &ne; fine · failed &ne; unavailable · no authenticity / replacement / health verdicts.</footer>
+<footer>iPhone Forensics v{esc(report.get('version'))} · report.json is the evidence of record · Manual check required for Face ID, display and sensors · no authenticity / replacement / health verdicts · not collected ≠ fine.</footer>
 </main></body></html>"""
     # Re-parse what was rendered and note the verdict as a comment. Validation must
     # never block report generation, so a validator failure is reported, not raised.
@@ -1077,7 +954,6 @@ Not collected &ne; fine · failed &ne; unavailable · no authenticity / replacem
     for issue in issues[:5]:
         print(f"[report] HTML validation: {issue}", file=sys.stderr)
     (run_dir / "report.html").write_text(html_doc, encoding="utf-8")
-
 
 def finalize(run_dir: Path, report: dict[str, Any], redact_identifiers: bool = False) -> None:
     report["finished_at"] = (

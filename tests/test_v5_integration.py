@@ -774,7 +774,8 @@ def test_outline_survives_conditional_panels_being_absent(tmp_path: Path):
     assert rendered == list(SECTION_TITLES)
     # No hardware/integrity data -> one "not collected" line, no empty tables.
     assert "hardware and battery: not collected" in html
-    assert "comparison: not collected" in html
+    # No previous snapshot -> no comparison panel and no boilerplate saying so.
+    assert "Change since the previous inspection" not in html
 
 
 def test_every_section_title_is_referenced_by_the_rendered_report(tmp_path: Path):
