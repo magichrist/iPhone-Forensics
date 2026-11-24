@@ -220,6 +220,17 @@ def test_bad_device_never_starts_a_run(monkeypatch):
     assert cli.main(["inspect", "--device", "banana"]) == cli_v4.EXIT_CONFIG
 
 
+def test_empty_device_with_no_attached_device_returns_no_device_exit(monkeypatch):
+    """`--device` with no value opens the selector; with no device it exits 3.
+
+    The early-return path used an undefined name, so a bare `--device` on a
+    machine with no phone crashed with NameError instead of the documented exit.
+    """
+    monkeypatch.setattr(cli, "_probe_devices", lambda: [])
+    namespace = cli._build_parser().parse_args(["inspect", "--device"])
+    assert cli._resolve_device_argument(namespace) == cli_v4.EXIT_NO_DEVICE
+
+
 # ------------------------------------------------------------- consent plumbing
 
 

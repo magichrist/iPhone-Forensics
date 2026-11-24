@@ -60,6 +60,7 @@ from .cli_v4 import (
     DEFAULT_OUTPUT_ROOT,
     EXIT_AMBIGUOUS_DEVICE,
     EXIT_CONFIG,
+    EXIT_NO_DEVICE,
     EXIT_OK,
     _tool_path,
     add_subcommands,
