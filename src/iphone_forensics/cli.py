@@ -479,14 +479,16 @@ def _engine_args(
         the selected ones — the operator ticked the app inventory and the run also
         pulled process lists, crash reports, and provisioning profiles.
 
-        So: a non-empty `explicit` means "exactly these", and `sensitive` is only
-        consulted when nothing was named specifically, i.e. `--yes-sensitive`.
-        Naming a flag directly on the command line always wins for its own
-        collector, whichever path granted the rest.
+        So: a non-empty `explicit` means "exactly these" for subset consent.
+        `--yes-sensitive` is a blanket switch by contract and stays blanket
+        even when a collector was also named: that is the only path that sets
+        the flag on the namespace. Naming a flag directly on the command line
+        always wins for its own collector, whichever path granted the rest.
         """
         if _given(namespace, dest):
             return True
-        return dest in explicit if explicit else bool(sensitive)
+        blanket = bool(_given(namespace, "yes_sensitive")) and bool(sensitive)
+        return (dest in explicit if explicit else bool(sensitive)) or blanket
 
     # Two offline paths reach the engine's `backup_dir`: the engine's own
     # `--backup-dir`, and the facade's legacy `--mvt-backup`. Only the latter was

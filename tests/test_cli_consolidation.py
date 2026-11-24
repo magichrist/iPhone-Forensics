@@ -483,6 +483,20 @@ def test_yes_sensitive_still_wins_when_combined_with_an_explicit_flag():
     assert all(enabled.values())
 
 
+def test_yes_sensitive_with_an_explicit_flag_still_grants_the_blanket():
+    """`--yes-sensitive` means all boolean collectors, even alongside a flag.
+
+    `_resolve_sensitive` announces that scope for this exact invocation, so the
+    engine namespace must not silently narrow it to the one named collector.
+    """
+    namespace = cli._build_parser().parse_args(["inspect", "--yes-sensitive", "--crash-reports"])
+    sensitive, explicit = cli._resolve_sensitive(namespace)
+    engine = cli._engine_args(
+        namespace, output=".", device="UDID", sensitive=sensitive, explicit=explicit
+    )
+    assert all(getattr(engine, dest) for dest in _BOOLEAN_CONSENT_DESTS)
+
+
 def test_consent_never_invents_a_capture_window_or_backup():
     """Ticking a needs-value item must not fill in its argument.
 
