@@ -52,6 +52,41 @@ def test_safe_name_neutrally_handles_traversal():
     assert "\\" not in safe_name("a\\b")
 
 
+def test_verify_manifest_does_not_follow_traversal_to_an_existing_file(tmp_path: Path):
+    """A crafted manifest must not verify a file outside the run directory.
+
+    The previous check only worked because the outside path did not exist; with
+    a real file there, the verifier hashed it and reported a clean chain.
+    """
+    import hashlib
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.txt"
+    secret.write_text("secret")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    manifest = run_dir / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "5.0.0",
+                "artifacts": [
+                    {
+                        "path": "../outside/secret.txt",
+                        "size_bytes": secret.stat().st_size,
+                        "sha256": hashlib.sha256(secret.read_bytes()).hexdigest(),
+                    }
+                ],
+            }
+        )
+    )
+    verdict = verify_manifest(manifest)
+    assert verdict["verified"] is False
+    assert verdict["missing"] == 1
+    assert "outside" in verdict["problems"][0]["problem"]
+
+
 def test_verify_manifest_rejects_traversal_paths(tmp_path: Path):
     (tmp_path / "raw").mkdir()
     (tmp_path / "raw" / "x.txt").write_text("x")

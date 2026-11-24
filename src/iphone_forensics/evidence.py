@@ -104,6 +104,15 @@ def verify_manifest(run_dir_or_manifest: Path) -> dict[str, Any]:
         }
 
     base = manifest_path.parent
+
+    def within_run(candidate: Path) -> bool:
+        # Reject `../` escapes and symlinks out of the run directory before any
+        # hashing: a manifest must never vouch for a file outside the chain.
+        try:
+            return candidate.resolve().is_relative_to(base.resolve())
+        except (OSError, ValueError):
+            return False
+
     matched = changed = missing = 0
     added: list[str] = []
     known_paths = set()
@@ -111,6 +120,10 @@ def verify_manifest(run_dir_or_manifest: Path) -> dict[str, Any]:
     for entry in artifacts:
         path = base / entry["path"]
         known_paths.add(entry["path"])
+        if not within_run(path):
+            missing += 1
+            problems.append({"path": entry["path"], "problem": "path outside run directory"})
+            continue
         if not path.exists():
             missing += 1
             problems.append({"path": entry["path"], "problem": "missing"})
