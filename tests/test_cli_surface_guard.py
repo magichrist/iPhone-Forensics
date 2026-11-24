@@ -73,6 +73,7 @@ def _run_module(module: str, home: Path, *argv: str) -> subprocess.CompletedProc
         cwd=str(REPO_ROOT),
         stdin=subprocess.DEVNULL,
         timeout=60,
+        check=False,
     )
 
 
@@ -92,7 +93,7 @@ def test_cli_help_lists_facade_commands_and_hides_legacy_collector_flags(tmp_pat
     # top-level options on purpose — that is how the pre-v5 no-subcommand
     # invocation works — so the check is against rendered help text, not against
     # the parser's option set.
-    top_level_options = {
+    {
         opt for action in cli._build_parser()._actions for opt in action.option_strings
     }
     for flag in LEGACY_COLLECTOR_FLAGS:
@@ -137,5 +138,6 @@ def test_iphone_audit_help_exits_zero(tmp_path: Path):
         cwd=str(REPO_ROOT),
         stdin=subprocess.DEVNULL,
         timeout=60,
+        check=False,
     )
     assert result.returncode == 0, result.stderr

@@ -65,6 +65,7 @@ def _run_cli(
         cwd=str(cwd or REPO_ROOT),
         stdin=subprocess.DEVNULL,
         timeout=CLI_TIMEOUT_SECONDS,
+        check=False,
     )
 
 

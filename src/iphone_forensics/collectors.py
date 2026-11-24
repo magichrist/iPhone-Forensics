@@ -4,8 +4,10 @@ import datetime as dt
 import plistlib
 import re
 import shutil
+import struct
 from pathlib import Path
 from typing import Any
+from xml.parsers.expat import ExpatError
 
 from .readonly import ReadOnlyViolation, enforce_read_only
 from .util import run_command, safe_name, write_command_result
@@ -48,7 +50,15 @@ def decode(value: bytes) -> str:
 def parse_plist(value: bytes) -> Any:
     try:
         return plistlib.loads(value)
-    except Exception:
+    except (
+        ExpatError,  # malformed XML plist
+        plistlib.InvalidFileException,  # malformed binary plist
+        struct.error,
+        TypeError,
+        ValueError,
+        OverflowError,
+    ):
+        # Unparseable output is missing evidence, never a reason to abort a run.
         return None
 
 

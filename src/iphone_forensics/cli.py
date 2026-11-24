@@ -1045,11 +1045,11 @@ _FACADE_AUGMENTED: tuple[tuple[str, Any, bool, str], ...] = (
         "inspect",
         _run_inspect_command,
         True,
-        "Run the standard profile: every non-destructive collector is on and "
+        ("Run the standard profile: every non-destructive collector is on and "
         "sensitive collection is off unless you consent.\n\n"
         "No flag is needed for a normal inspection. Device selection, output "
         "location, buyer checklists, redaction, and every legacy collector flag "
-        f"are documented by `{PROGRAM} --help-advanced`.",
+        f"are documented by `{PROGRAM} --help-advanced`."),
     ),
 )
 

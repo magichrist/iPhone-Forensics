@@ -368,49 +368,49 @@ def storage_checks(report: dict[str, Any]) -> list[SubsystemCheck]:
 MANUAL_SUBSYSTEMS = {
     "display": (
         "Display, touch, brightness, dead pixels, burn-in, discoloration, True Tone responsiveness",
-        "Structured physical test: full-white/full-black/screen grids; touch every corner and midpoints; "
-        "compare brightness at low/high settings; check for uneven tint and image retention.",
+        ("Structured physical test: full-white/full-black/screen grids; touch every corner and midpoints; "
+        "compare brightness at low/high settings; check for uneven tint and image retention."),
     ),
     "cameras": (
         "Front/rear cameras, ultra-wide/telephoto where present, autofocus, OIS, flash, lens switching",
-        "Open Camera, take photos with each lens, tap-to-focus near/far, record a short video while panning, "
-        "toggle flash, switch between 0.5×/1×/2×+ and check for dust, blur, color casts.",
+        ("Open Camera, take photos with each lens, tap-to-focus near/far, record a short video while panning, "
+        "toggle flash, switch between 0.5×/1×/2×+ and check for dust, blur, color casts."),
     ),
     "biometrics": (
         "Face ID or Touch ID enrollment and unlock reliability",
-        "Enroll a fresh Face ID/Touch ID record and unlock several times in different lighting/angles. "
-        "Never store or extract biometric templates; this check is functional only.",
+        ("Enroll a fresh Face ID/Touch ID record and unlock several times in different lighting/angles. "
+        "Never store or extract biometric templates; this check is functional only."),
     ),
     "audio": (
         "Microphones (bottom, front, rear), earpiece, loudspeaker, call audio routing",
-        "Record a voice memo and play it back; test speakerphone; test each mic path (voice memo uses bottom "
-        "mic, video uses front/rear mics); play tones at full and low volume.",
+        ("Record a voice memo and play it back; test speakerphone; test each mic path (voice memo uses bottom "
+        "mic, video uses front/rear mics); play tones at full and low volume."),
     ),
     "connectivity_manual": (
         "Wi-Fi, Bluetooth, cellular, GPS, NFC where the model has it",
-        "Join a known-good Wi-Fi; pair a Bluetooth accessory; check cellular signal and a test "
-        "call; confirm Maps shows a GPS fix; test Apple Pay tap where practical.",
+        ("Join a known-good Wi-Fi; pair a Bluetooth accessory; check cellular signal and a test "
+        "call; confirm Maps shows a GPS fix; test Apple Pay tap where practical."),
     ),
     "buttons_haptics": (
         "Side button, volume buttons, Action/mute switch where present, vibration, haptics",
-        "Press each button and confirm the expected on-screen behavior; toggle silent mode and feel "
-        "the haptic; enable keyboard haptics.",
+        ("Press each button and confirm the expected on-screen behavior; toggle silent mode and feel "
+        "the haptic; enable keyboard haptics."),
     ),
     "charging_manual": (
         "Wired charging, data transfer, wireless charging (MagSafe/Qi) where supported",
-        "Connect a data-capable cable and confirm charging starts and a file/photo transfer works "
+        ("Connect a data-capable cable and confirm charging starts and a file/photo transfer works "
         "or the device appears in Finder; place on a Qi/MagSafe pad and confirm charge begins. "
-        "Wiggle the cable to detect intermittent contacts.",
+        "Wiggle the cable to detect intermittent contacts."),
     ),
     "thermal": (
         "Sustained-load thermal behavior",
-        "Record video for 10+ minutes at max brightness with the phone plugged in; note any abrupt "
-        "shutdown, persistent surface heat, or sustained 'temperature' warning.",
+        ("Record video for 10+ minutes at max brightness with the phone plugged in; note any abrupt "
+        "shutdown, persistent surface heat, or sustained 'temperature' warning."),
     ),
     "sensors": (
         "Proximity, ambient light, accelerometer/gyroscope, compass, LiDAR where present",
-        "Cover the top of the screen during a call to verify proximity; auto-brightness should adapt; "
-        "open Compass/Measure app and check orientation tracking.",
+        ("Cover the top of the screen during a call to verify proximity; auto-brightness should adapt; "
+        "open Compass/Measure app and check orientation tracking."),
     ),
 }
 

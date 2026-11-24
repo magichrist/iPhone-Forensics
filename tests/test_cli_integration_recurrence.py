@@ -19,6 +19,7 @@ def _run_cli(*argv: str) -> subprocess.CompletedProcess:
         text=True,
         env=env,
         timeout=60,
+        check=False,
     )
 
 

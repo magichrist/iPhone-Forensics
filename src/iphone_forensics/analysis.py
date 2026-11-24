@@ -428,14 +428,19 @@ def _recurrence_analysis(
             # UTC suffix once, then try each shape; the old conditional munging
             # left the suffix in place for +0000 and made bare ISO unparseable.
             candidate = raw.replace("+0000", "Z").removesuffix("Z")
-            parsed = None
-            for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
-                try:
-                    parsed = _dt.datetime.strptime(candidate, fmt)
-                    break
-                except ValueError:
-                    continue
-            timestamps.append(parsed.isoformat() + "Z" if parsed else None)
+            # fromisoformat accepts all three shapes (T/space, with/without
+            # fractions). Make the UTC assumption explicit instead of parsing a
+            # naive datetime and labelling it Z afterwards; the emitted string is
+            # unchanged for every shape the old loop accepted.
+            try:
+                parsed = _dt.datetime.fromisoformat(f"{candidate}+00:00")
+            except ValueError:
+                parsed = None
+            timestamps.append(
+                parsed.astimezone(_dt.UTC).replace(tzinfo=None).isoformat() + "Z"
+                if parsed
+                else None
+            )
         known = [t for t in timestamps if t]
         patterns.append(
             {

@@ -30,7 +30,7 @@ def test_qa_summary_ready_requires_all_pass():
 
 def test_compare_pre_post_requires_both_reports(tmp_path: Path):
     case = new_case("CASE-1")
-    result = qa = None
+    result = None
     from iphone_forensics.repair import compare_pre_post
 
     result = compare_pre_post(case)
@@ -51,6 +51,7 @@ def _run_cli(*argv: str) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         env={"PYTHONPATH": "src", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"},
+        check=False,
     )
 
 

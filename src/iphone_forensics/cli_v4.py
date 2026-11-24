@@ -109,7 +109,7 @@ def _tool_path(name: str) -> str | None:
         return shutil.which("pymobiledevice3")
     if name == "mvt-ios":
         return shutil.which("mvt-ios")
-    return shutil.which(name) if name in LIB_TOOLS else shutil.which(name)
+    return shutil.which(name)
 
 
 # ------------------------------------------------------------ configuration
@@ -136,10 +136,11 @@ def default_config() -> dict[str, Any]:
 def validate_config(data: Any, defaults: dict[str, Any] | None = None) -> None:
     """Validate a parsed config object; shared by `config --check` and auto-load.
 
-    Raises ValueError with a human-readable reason on the first problem.
+    Raises TypeError when the top level is not an object, ValueError with a
+    human-readable reason for an invalid value.
     """
     if not isinstance(data, dict):
-        raise ValueError("must be a JSON object")
+        raise TypeError("must be a JSON object")
     defaults = defaults if defaults is not None else default_config()
     int_keys = {key for key, value in defaults.items() if isinstance(value, int)}
     for key, value in data.items():
@@ -159,7 +160,7 @@ def _read_config_file(path: Path) -> dict[str, Any]:
         raise ConfigError(f"cannot read config {path}: {exc}") from exc
     try:
         validate_config(data)
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         raise ConfigError(f"invalid config {path}: {exc}") from exc
     return data
 
@@ -340,7 +341,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 raw_probe = Path(probe) / "doctor-probe"
                 raw_probe.mkdir(parents=True, mode=0o700)
                 devices = discover_devices(raw_probe, collection_probe)
-        except Exception as exc:  # doctor must never crash on odd tool behavior
+        # Doctor must never crash on odd tool behavior: the probe can fail in
+        # many third-party ways, and every failure is reported, not hidden.
+        except Exception as exc:  # noqa: BLE001
             print(f"device discovery probe failed: {exc}")
     print(f"\nDevice discovery: {'none detected' if not devices else f'{len(devices)} device(s)'}")
     for i, udid in enumerate(devices, 1):
@@ -431,7 +434,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         try:
             loaded = json.loads(Path(args.buyer_json).expanduser().read_text(encoding="utf-8"))
             if not isinstance(loaded, dict):
-                raise ValueError("top-level JSON must be an object")
+                raise TypeError("top-level JSON must be an object")
             defaults = buyer_template()
             for section in ("buyer", "observations"):
                 if isinstance(loaded.get(section), dict):
@@ -441,7 +444,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
                     if check_id in defaults["checks"] and isinstance(entry, dict):
                         defaults["checks"][check_id].update(entry)
             buyer_data = defaults
-        except (OSError, json.JSONDecodeError, ValueError) as exc:
+        except (OSError, TypeError, ValueError) as exc:
             print(f"error: cannot read --buyer-json: {exc}", file=sys.stderr)
             return EXIT_CONFIG
 
@@ -872,7 +875,7 @@ def cmd_buyer(args: argparse.Namespace) -> int:
         try:
             loaded = json.loads(Path(args.checklist_json).expanduser().read_text(encoding="utf-8"))
             if not isinstance(loaded, dict):
-                raise ValueError("top-level JSON must be an object")
+                raise TypeError("top-level JSON must be an object")
             # Deep-merge user fields into the full default checklist so omitted
             # entries stay explicitly unknown (same semantics as v3 --buyer-json).
             for section in ("buyer", "observations"):
@@ -882,7 +885,7 @@ def cmd_buyer(args: argparse.Namespace) -> int:
                 for check_id, entry in loaded["checks"].items():
                     if check_id in data["checks"] and isinstance(entry, dict):
                         data["checks"][check_id].update(entry)
-        except (OSError, ValueError) as exc:
+        except (OSError, TypeError, ValueError) as exc:
             print(f"error: cannot read checklist: {exc}", file=sys.stderr)
             return EXIT_CONFIG
     result = evaluate_v4(data)
@@ -985,8 +988,8 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
         steps.append(
             (
                 "4. EVIDENCE",
-                f"{triage['panic_or_watchdog_candidate_count']} panic/watchdog artifacts on disk; "
-                "correlate recurrence and consider professional diagnostics.",
+                (f"{triage['panic_or_watchdog_candidate_count']} panic/watchdog artifacts on disk; "
+                "correlate recurrence and consider professional diagnostics."),
             )
         )
     if not steps:
@@ -1199,7 +1202,7 @@ def cmd_config(args: argparse.Namespace) -> int:
             validate_config(data, defaults)
             print(f"Config OK: {source}")
             return EXIT_OK
-        except (OSError, ValueError) as exc:
+        except (OSError, TypeError, ValueError) as exc:
             print(f"error: invalid config: {exc}", file=sys.stderr)
             return EXIT_CONFIG
     target = Path(args.out).expanduser() if args.out else Path.cwd() / "iphone-surgery.json"

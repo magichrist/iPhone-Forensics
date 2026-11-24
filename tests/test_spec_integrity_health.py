@@ -28,7 +28,7 @@ def test_all_nine_integrity_states_are_enumerable():
 
 
 def test_classify_consistent_when_values_match():
-    classification, _ = classify_change("ProductType", "iPhone15,4", "iPhone15,4")
+    _classification, _ = classify_change("ProductType", "iPhone15,4", "iPhone15,4")
     # identical values never reach classify_change, but the engine records
     # 'consistent' in assess_integrity — verify that instead:
     result = assess_integrity(
@@ -51,12 +51,12 @@ def test_classify_serial_change_suspicious():
 
 
 def test_classify_diagnostic_metric_change():
-    classification, finding = classify_change("diagnostic:GasGauge:CycleCount", 0, 402)
+    classification, _finding = classify_change("diagnostic:GasGauge:CycleCount", 0, 402)
     assert classification == "change_detected"
 
 
 def test_classify_unknown_field_suspicious_not_replacement():
-    classification, finding = classify_change("SomeUnmappedField", "x", "y")
+    classification, _finding = classify_change("SomeUnmappedField", "x", "y")
     assert classification == "suspicious"
     # The critical rule: metadata change is never auto-called physical replacement.
     assert "replacement_indicated" != classification
