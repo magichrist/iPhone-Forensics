@@ -208,6 +208,23 @@ def test_single_artifact_is_not_a_pattern(tmp_path: Path):
     assert triage["recurrence"]["pattern_count"] == 0
 
 
+def test_naive_iso_timestamps_contribute_to_the_span():
+    """A common ISO timestamp without a trailing Z is still a valid timestamp."""
+    from iphone_forensics.analysis import _recurrence_analysis
+
+    items = [
+        {
+            "bug_type": "210",
+            "procName": "kernel",
+            "timestamp": f"2026-01-0{i + 1}T10:00:00",
+        }
+        for i in range(2)
+    ]
+    pattern = _recurrence_analysis(items, [])["repeated_patterns"][0]
+    assert len(pattern["timestamps"]) == 2
+    assert "2026-01-01" in pattern["span"]
+
+
 def test_recurrence_never_classified_as_diagnosis():
     from iphone_forensics.analysis import _recurrence_analysis
 

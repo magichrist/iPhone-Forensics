@@ -423,13 +423,15 @@ def _recurrence_analysis(
             continue
         timestamps = []
         for it in items:
-            raw = str(it.get("timestamp") or it.get("captureTime") or "")
+            raw = str(it.get("timestamp") or it.get("captureTime") or "").strip()
+            # ISO timestamps arrive with Z, +0000, or no zone at all. Strip the
+            # UTC suffix once, then try each shape; the old conditional munging
+            # left the suffix in place for +0000 and made bare ISO unparseable.
+            candidate = raw.replace("+0000", "Z").removesuffix("Z")
             parsed = None
-            for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S"):
+            for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
                 try:
-                    parsed = _dt.datetime.strptime(
-                        raw.replace("+0000", "Z").rstrip("Z") if not raw.endswith("Z") else raw, fmt
-                    )
+                    parsed = _dt.datetime.strptime(candidate, fmt)
                     break
                 except ValueError:
                     continue
