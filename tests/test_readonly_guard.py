@@ -115,6 +115,16 @@ def test_every_mutating_shape_is_refused(command: list[str]) -> None:
         enforce_read_only(command)
 
 
+def test_bare_ideviceinfo_fallback_shape_is_allowed() -> None:
+    """The key-value fallback in collect_device is a read-only query too.
+
+    When `ideviceinfo -x` is not a plist, collectors.py falls back to a bare
+    `ideviceinfo -u UDID`. Refusing that shape aborted the whole inspection on
+    exactly the devices the fallback exists to support.
+    """
+    assert is_read_only([f"{BIN}/ideviceinfo", "-u", UDID])
+
+
 def test_unknown_shapes_are_refused_by_default() -> None:
     """The allowlist fails closed. An unrecognised flag is not trusted."""
     for command in (

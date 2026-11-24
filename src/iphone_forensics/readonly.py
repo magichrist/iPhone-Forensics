@@ -147,6 +147,9 @@ READ_ONLY_COMMANDS: frozenset[tuple[str, tuple[str, ...]]] = frozenset(
     {
         # -- libimobiledevice -------------------------------------------------
         ("idevice_id", ("-l",)),
+        # Bare = key/value dump. collect_device falls back to this shape when an
+        # -x response is not a plist, so refusing it would abort that device.
+        ("ideviceinfo", ()),
         ("ideviceinfo", ("-x",)),
         ("ideviceinfo", ("-q", "com.apple.disk_usage")),
         ("ideviceinfo", ("-q", "com.apple.mobile.iTunes")),
