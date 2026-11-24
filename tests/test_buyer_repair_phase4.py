@@ -291,6 +291,13 @@ def test_qa_ready_for_customer_requires_all_fourteen_checks_pass():
     assert qa_summary(case)["ready_for_customer"] is True
 
 
+def test_qa_with_no_checks_is_not_ready_for_customer():
+    """An empty checklist is zero evidence, not fourteen passes."""
+    summary = qa_summary({"qa_checks": {}})
+    assert summary["total"] == 0
+    assert summary["ready_for_customer"] is False
+
+
 @pytest.mark.parametrize("broken", ["not_tested", "fail"])
 def test_qa_single_unfinished_check_withholds_ready_for_customer(broken):
     case = new_case("CASE-4")

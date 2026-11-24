@@ -123,7 +123,8 @@ def qa_summary(case: dict[str, Any]) -> dict[str, Any]:
         "pass": sum(1 for v in values if v == "pass"),
         "fail": sum(1 for v in values if v == "fail"),
         "not_tested": sum(1 for v in values if v == "not_tested"),
-        "ready_for_customer": all(v == "pass" for v in values),
+        # No checks recorded is zero evidence, not a completed QA pass.
+        "ready_for_customer": bool(values) and all(v == "pass" for v in values),
     }
 
 
