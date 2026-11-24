@@ -20,3 +20,4 @@ devices-probe/
 .venv/
 .freebuff/
 docs/
+.venv
